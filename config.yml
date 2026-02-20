@@ -22,7 +22,7 @@ chat:
 challenge_policy:
   accept_bot: true
   accept_human: true
-  rated: false
+  rated: true
   time_controls:
     - bullet
     - blitz
