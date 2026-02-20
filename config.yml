@@ -6,10 +6,10 @@ engine:
   name: "Ethereal"
   protocol: "uci"
   uci_options:
-    Threads: 2            # 2 motor için toplam 2 thread (2 çekirdekli sistemde her motora 1 saf çekirdek)
-    Hash: 1024             # 2 motor x 256MB = 512MB RAM. Hafıza derinliği için ideal.
+    Threads: 1            # 2 motor için toplam 2 thread (2 çekirdekli sistemde her motora 1 saf çekirdek)
+    Hash: 512             # 2 motor x 256MB = 512MB RAM. Hafıza derinliği için ideal.
     MoveOverhead: 500    # Lag koruması. Uzun maçlarda (30+0) risk almamak için 2 saniye pay.
-    Ponder: true         # Rakip düşünürken CPU'yu yormasın, diğer motorun performansını çalmasın.
+    Ponder: false         # Rakip düşünürken CPU'yu yormasın, diğer motorun performansını çalmasın.
     SyzygyPath: "./syzygy"
     SyzygyProbeDepth: 1
 
