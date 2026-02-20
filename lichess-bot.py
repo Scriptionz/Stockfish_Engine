@@ -26,8 +26,8 @@ SETTINGS = {
     "STOP_ACCEPTING_MINS": 15,    # Kapanışa kaç dk kala yeni maç almasın?
     
     # --- MOTOR VE ZAMAN YÖNETİMİ ---
-    "LATENCY_BUFFER": 0.2,       # Saniye cinsinden ağ gecikme payı (150ms)
-    "TABLEBASE_PIECE_LIMIT": 6,   # Kaç taş kalınca tablebase'e sorsun? (6 güvenlidir)
+    "LATENCY_BUFFER": 0.8,       # Saniye cinsinden ağ gecikme payı (150ms)
+    "TABLEBASE_PIECE_LIMIT": 7,   # Kaç taş kalınca tablebase'e sorsun? (6 güvenlidir)
     "MIN_THINK_TIME": 0.05,       # En az düşünme süresi
     
     # --- MESAJLAR ---
@@ -68,36 +68,48 @@ class OxydanAegisV4:
 
     def calculate_smart_time(self, t, inc, board):
         move_num = board.fullmove_number if board else 1
+    
+        # 1. GERÇEK PREMOVE MODU (Zaman aşırı azsa hiç hesaplama)
+        # Eğer 1 saniyenin altındaysak, 20ms içinde ne bulursan fırlat!
+        if t < 1.0:
+            return 0.02 
         
-        # 1. ACİL DURUM (3 saniye altı panik modu)
+        # 2. ACİL DURUM PANİK MODU (1-3 saniye arası)
         if t < 3.0:
-            return 0.05 if t > 1.0 else 0.02
-
-        # 2. TEMPO ANALİZİ (MTG - Moves To Go)
-        if t > 600: mtg = 45   # Classical
-        elif t > 180: mtg = 35 # Rapid
-        else: mtg = 25         # Blitz
+            # Premove hissi için düşünme süresini 50ms ile sınırlıyoruz
+            return 0.05
+    
+        # 3. TEMPO ANALİZİ (Geliştirilmiş MTG)
+        # Blitz (180s) için 25 hamle beklentisi çok fazla olabilir, 
+        # 35-40 idealdir ki sona süre kalsın.
+        if t > 600: mtg = 40
+        elif t > 180: mtg = 35
+        else: mtg = 30 # Daha agresif (daha çok süreyi sona saklar)
+    
+        # 4. HESAPLAMA VE PREMOVE GÜVENLİĞİ
+        # target_time'ı hesaplarken 'inc' (artış) yoksa daha cimri olmalıyız.
+        base_budget = (t / mtg) + (inc * 0.7) 
         
-        if move_num > 60: mtg = max(15, mtg - 10)
-
-        # 3. BÜTÇE VE KARMAŞIKLIK
-        base_budget = (t / mtg) + (inc * 0.85)
+        # Karmaşıklık çarpanını biraz daha daraltalım (Vakit varken düşün, yoksa hızlan)
         legal_moves = board.legal_moves.count()
-        complexity = 1.3 if legal_moves > 40 else (0.7 if legal_moves < 15 else 1.0)
-        target_time = base_budget * complexity
-
-        # 4. GÜVENLİK SINIRLARI
-        if t < 10.0:
-            target_time = min(target_time, t / 45)
-            min_think = SETTINGS["MIN_THINK_TIME"]
-        else:
-            min_think = 0.3 if t > 30 else 0.1
-
-        max_limit = t * 0.15 # Tek hamlede bütçenin %15'inden fazlasını harcama
-        final_time = max(min_think, min(target_time, max_limit))
+        complexity = 1.2 if legal_moves > 40 else (0.8 if legal_moves < 10 else 1.0)
         
-        return max(0.01, final_time - SETTINGS["LATENCY_BUFFER"])
-
+        target_time = base_budget * complexity
+    
+        # 5. PREMOVE GİBİ DAVRANMASI İÇİN 'MOVE OVERHEAD' EKLEMESİ
+        # Stockfish'in içindeki "Move Overhead" parametresini 500ms yaparsan, 
+        # motor zaten kendi kendine 0.5s pay bırakır. 
+        # Burada biz de final_time'dan düşüyoruz:
+        
+        overhead = SETTINGS.get("LATENCY_BUFFER", 0.5)
+        final_time = target_time - overhead
+    
+        # 6. ALT VE ÜST SINIRLAR (Premove için kritik)
+        if t < 15.0:
+            # Süre 15s altına düştüğünde asla t/10'dan fazla düşünme!
+            final_time = min(final_time, t / 20)
+        
+        return max(0.01, final_time)
     def get_best_move(self, board, wtime, btime, winc, binc):
         """
         Oxydan Bot Hamle Karar Mekanizması:
