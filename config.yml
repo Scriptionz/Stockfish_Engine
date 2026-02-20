@@ -1,0 +1,60 @@
+token: "$LICHESS_TOKEN"
+url: "https://lichess.org/"
+
+engine:
+  dir: "./src/"
+  name: "Ethereal"
+  protocol: "uci"
+  uci_options:
+    Threads: 2            # 2 motor için toplam 2 thread (2 çekirdekli sistemde her motora 1 saf çekirdek)
+    Hash: 1024             # 2 motor x 256MB = 512MB RAM. Hafıza derinliği için ideal.
+    MoveOverhead: 500    # Lag koruması. Uzun maçlarda (30+0) risk almamak için 2 saniye pay.
+    Ponder: true         # Rakip düşünürken CPU'yu yormasın, diğer motorun performansını çalmasın.
+    SyzygyPath: "./syzygy"
+    SyzygyProbeDepth: 1
+
+# --- SOSYAL AYARLAR ---
+chat:
+  welcome: "Hi! Void v1 actived. Be ready for a great game :)"
+  goodbye: "GG! See you later."
+
+# --- SAVAŞ MODU (GELEN MEYDAN OKUMALAR) ---
+challenge_policy:
+  accept_bot: true
+  accept_human: true
+  rated: false
+  time_controls:
+    - bullet
+    - blitz
+    - rapid
+    - classical
+  min_time: 60
+  max_time: 2000          # 30+0 gibi uzun maçları da kabul edebilmesi için yükseltildi
+
+# --- MATCHMAKING (BİZİM MEYDAN OKUMALARIMIZ) ---
+matchmaking:
+  allow_feed: true
+  challenge_interval: 60  # Daha ağırbaşlı ve seçici maç arama aralığı
+  challenge_timeout: 30
+  max_games: 2            # 2 motorlu sistemin ana sınırı
+  
+  # --- ELO KORUMA FİLTRESİ ---
+  opponent_min_rating: 2250      # 2735 puandasın, alt seviyeyle puan kaybetme riskini sıfırlıyoruz
+  opponent_max_rating: 4000      # En üst seviyedeki devleri hedefliyoruz
+  opponent_rating_difference: 700 
+
+  time_controls:
+    - "1+0"  # Çok Sık
+    - "1+1"
+    - "2+1"
+    - "3+0"  # Sık
+    - "3+2"
+    - "5+0"
+    - "5+2"
+    - "10+0" # Nadir (Rapid)
+    - "10+2"
+    - "30+0" # En Nadir (Klasik)
+    
+  challenge_bots: true
+  challenge_humans: false
+  selection: "random"
