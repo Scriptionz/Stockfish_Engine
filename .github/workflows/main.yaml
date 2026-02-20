@@ -1,0 +1,66 @@
+name: Void Lichess Bot
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+on:
+  workflow_dispatch: # Manuel başlatma
+  schedule:
+    - cron: '0 */6 * * *' # Her 6 saatte bir otomatik başlar
+
+jobs:
+  run-bot:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Kodlari Cek
+        uses: actions/checkout@v4
+
+      - name: Python Kurulumu
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Cerebellum Kitabini Indir ve Kur
+        run: |
+          echo "📚 Devasa açılış kitabı indiriliyor..."
+          curl -L "https://github.com/Scriptionz/Oxydan-Chess-Bot/releases/download/v1_Book/Cerebellum3Merge.zip" -o book.zip
+          echo "📂 ZIP'ten çıkarılıyor..."
+          unzip book.zip
+          mv Cerebellum3Merge.bin book.bin
+          echo "✅ Kitap hazır: $(ls -lh book.bin)"
+
+      - name: Stockfish 18 Motorunu Indir
+        run: |
+          echo "🌌 VOID için Stockfish 18 (Latest) hazırlanıyor..."
+          # Resmi Stockfish reposundan en son Ubuntu sürümünü çekiyoruz
+          curl -L "https://github.com/official-stockfish/Stockfish/releases/latest/download/stockfish-ubuntu-x86-64-avx2.tar.gz" -o sf18.tar.gz
+          
+          # Dosyayı çıkartalım
+          mkdir -p sf_engine
+          tar -xvf sf18.tar.gz -C sf_engine
+          
+          # İçindeki çalıştırılabilir dosyayı bul ve src/Ethereal olarak maskele
+          # Bu sayede mevcut 'lichess-bot.py' kodunu hiç değiştirmene gerek kalmaz.
+          find sf_engine -type f -name "stockfish*" -exec mv {} ./src/Ethereal \;
+          
+          chmod +x ./src/Ethereal
+          echo "✅ Stockfish 18 başarıyla ./src/Ethereal konumuna yerleştirildi."
+
+      - name: Kutuphaneleri Kur
+        run: |
+          pip install -r requirements.txt
+
+      - name: Motor Test (UCI Testi)
+        run: |
+          chmod +x ./src/Ethereal
+          echo "uci" | ./src/Ethereal | grep "uciok" || (echo "MOTOR CALISMIYOR!" && exit 1)
+
+      - name: Botu Baslat
+        env:
+          LICHESS_TOKEN: ${{ secrets.LICHESS_TOKEN }}
+        run: |
+          # Config dosyasındaki token yer tutucusunu güncelle
+          sed -i "s/\$LICHESS_TOKEN/$LICHESS_TOKEN/g" config.yml || echo "Config hatasi!"
+          # Botu başlat
+          python -u lichess-bot.py
