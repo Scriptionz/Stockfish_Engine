@@ -30,22 +30,30 @@ jobs:
           mv Cerebellum3Merge.bin book.bin
           echo "✅ Kitap hazır: $(ls -lh book.bin)"
 
-      - name: Stockfish 18 Motorunu Indir
+      - name: Stockfish 18 Motorunu Kur (Garantili Link)
         run: |
-          echo "🌌 VOID için Stockfish 18 (Latest) hazırlanıyor..."
-          # Resmi Stockfish reposundan en son Ubuntu sürümünü çekiyoruz
-          curl -L "https://github.com/official-stockfish/Stockfish/releases/latest/download/stockfish-ubuntu-x86-64-avx2.tar.gz" -o sf18.tar.gz
+          echo "🌌 VOID uyanıyor: Doğrudan bağlantı kuruldu..."
           
-          # Dosyayı çıkartalım
-          mkdir -p sf_engine
-          tar -xvf sf18.tar.gz -C sf_engine
+          # 1. Klasör hazırlığı
+          mkdir -p src
           
-          # İçindeki çalıştırılabilir dosyayı bul ve src/Ethereal olarak maskele
-          # Bu sayede mevcut 'lichess-bot.py' kodunu hiç değiştirmene gerek kalmaz.
-          find sf_engine -type f -name "stockfish*" -exec mv {} ./src/Ethereal \;
+          # 2. Senin verdiğin doğrudan linkle indirme
+          wget -q --show-progress "https://github.com/official-stockfish/Stockfish/releases/download/sf_18/stockfish-ubuntu-x86-64-avx2.tar" -O sf18.tar
           
+          # 3. Dosyanın indiğini ve boyutunu kontrol et
+          ls -lh sf18.tar
+          
+          # 4. Paketi aç (Düz .tar olduğu için -xvf kullanıyoruz)
+          tar -xvf sf18.tar
+          
+          # 5. Motoru bul ve 'Ethereal' olarak maskele
+          # Not: find komutu klasörün içindeki o uzun isimli dosyayı otomatik bulur
+          find . -maxdepth 3 -type f -name "stockfish-ubuntu-x86-64-avx2" -exec mv {} ./src/Ethereal \;
+          
+          # 6. İzinleri ver ve test et
           chmod +x ./src/Ethereal
-          echo "✅ Stockfish 18 başarıyla ./src/Ethereal konumuna yerleştirildi."
+          echo "✅ Motor başarıyla kuruldu ve maskelendi."
+          ./src/Ethereal uci | grep "Stockfish 18"
 
       - name: Kutuphaneleri Kur
         run: |
