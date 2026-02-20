@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 # ⚙️ MATCHMAKER AYARLARI (Buradan yönetebilirsin)
 # ==========================================================
 SETTINGS = {
-    "RATED_MODE": False,          # True: Puanlı, False: Puansız (Test için False kalmalı)
+    "RATED_MODE": True,          # True: Puanlı, False: Puansız (Test için False kalmalı)
     "MAX_PARALLEL_GAMES": 2,     # Aynı anda kaç maç yapılsın? (GitHub için 1 önerilir)
     "MIN_RATING": 2250,          # Rakip minimum kaç elo olsun?
     "MAX_RATING": 4000,          # Rakip maksimum kaç elo olsun?
