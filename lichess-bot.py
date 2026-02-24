@@ -104,17 +104,19 @@ class OxydanAegisV4:
             except: pass
 
         # 3. MOTOR
+        engine = None # Başta boş tanımla
         try:
-            engine = self.engine_pool.get(timeout=5) # 5 saniye içinde motor alamazsa hata verir
-        except queue.Empty:
-            print("🚨 KRİTİK: Motor havuzu boşaldı, hamle yapılamıyor!")
-        try:
+            engine = self.engine_pool.get(timeout=5)
             my_inc = self.to_seconds(winc if board.turn == chess.WHITE else binc)
             think_time = self.calculate_smart_time(my_time, my_inc, board)
             result = engine.play(board, chess.engine.Limit(time=think_time))
             return result.move
+        except Exception as e:
+            print(f"🚨 Motor Hatası: {e}")
+            return None # Hamle bulunamadıysa None döner, handle_game bunu yönetir
         finally:
-            self.engine_pool.put(engine)
+            if engine: # Sadece engine alındıysa geri koy
+                self.engine_pool.put(engine)
 
 def handle_game(client, game_id, bot, my_id):
     try:
@@ -152,17 +154,19 @@ def handle_game(client, game_id, bot, my_id):
                 move = bot.get_best_move(board, wtime, btime, winc, binc)
                 
                 if move:
-                    # Lichess gecikmelerine karşı 2 denemeli gönderim (Hızlı Premove Koruması)
-                    for attempt in range(2):
+                    for attempt in range(3): # 2 yerine 3 deneme
                         try:
                             client.bots.make_move(game_id, move.uci())
                             break 
                         except Exception as e:
-                            if "Not your turn" in str(e):
-                                time.sleep(0.05) # 50ms bekle ve tekrar dene
+                            err_msg = str(e)
+                            if "Not your turn" in err_msg:
+                                break # Sıra bizde değilse zorlama
+                            elif attempt < 2:
+                                print(f"⚠️ Hamle iletilemedi, tekrar deneniyor ({attempt+1}/3): {e}")
+                                time.sleep(0.2) # Kısa bir bekleme ve tekrar gönder
                             else:
-                                print(f"⚠️ Hamle gönderilemedi: {e}")
-                                break
+                                print(f"🚨 KRİTİK: Hamle 3 denemede de gitmedi! Oyun abort yiyebilir.")
     except Exception as e:
         print(f"🚨 Oyun Hatası ({game_id}): {e}", flush=True)
 
@@ -198,23 +202,33 @@ def main():
 
     print(f"🔥 Oxydan Aegis Hazır. ID: {my_id} | Max Slot: {SETTINGS['MAX_PARALLEL_GAMES']}", flush=True)
 
+    retry_delay = 5  # Hata sonrası başlangıç bekleme süresi
     while True:
         try:
-            # Bağlantı koptuğunda API'yi spamlamamak için kısa bir bekleme
-            time.sleep(0.5) 
-
+            # Her döngü başında veya hata sonrası bağlantıyı tazeleyelim
+            session = berserk.TokenSession(SETTINGS["TOKEN"])
+            client = berserk.Client(session=session)
+            
+            print(f"🔄 Lichess Akış Hattı Bağlanıyor...", flush=True)
+            
             for event in client.bots.stream_incoming_events():
+                retry_delay = 5  # Başarılı bir event geldiğinde hata sayacını sıfırla
+                
                 cur_elapsed = time.time() - start_time
                 should_stop = os.path.exists("STOP.txt") or cur_elapsed > SETTINGS["MAX_TOTAL_RUNTIME"]
                 close_to_end = cur_elapsed > (SETTINGS["MAX_TOTAL_RUNTIME"] - (SETTINGS["STOP_ACCEPTING_MINS"] * 60))
 
                 if event['type'] == 'challenge':
                     ch_id = event['challenge']['id']
-                    if should_stop or close_to_end or len(active_games) >= SETTINGS["MAX_PARALLEL_GAMES"]:
-                        client.challenges.decline(ch_id, reason='later')
-                        if should_stop and len(active_games) == 0: sys.exit(0)
-                    else:
-                        client.challenges.accept(ch_id)
+                    # Sadece Rate Limit yoksa kabul et/reddet
+                    try:
+                        if should_stop or close_to_end or len(active_games) >= SETTINGS["MAX_PARALLEL_GAMES"]:
+                            client.challenges.decline(ch_id, reason='later')
+                            if should_stop and len(active_games) == 0: sys.exit(0)
+                        else:
+                            client.challenges.accept(ch_id)
+                    except Exception as e:
+                        print(f"⚠️ Challenge yanıtlanamadı: {e}")
 
                 elif event['type'] == 'gameStart':
                     game_id = event['game']['id']
@@ -227,10 +241,18 @@ def main():
                         ).start()
 
         except Exception as e:
-            if "429" in str(e):
-                print("🚨 Hız sınırı (429) aşıldı! 60 saniye bekleniyor..."); time.sleep(60)
+            err_str = str(e)
+            if "429" in err_str:
+                wait_time = 120 # Rate limit varsa 2 dakika tam sessizlik
+                print(f"🚨 RATE LIMIT (429)! {wait_time} saniye tam blokaj uygulanıyor...")
+                time.sleep(wait_time)
+            elif "404" in err_str:
+                print(f"⚠️ Maç bulunamadı (404), muhtemelen abort edildi. Devam ediliyor...")
+                time.sleep(2)
             else:
-                print(f"⚠️ Bağlantı hatası, yeniden deneniyor: {e}"); time.sleep(5)
+                print(f"⚠️ Akış koptu: {err_str}. {retry_delay} sn içinde denenecek.")
+                time.sleep(retry_delay)
+                retry_delay = min(retry_delay * 2, 300) # Hata devam ederse bekleme süresini 5 dk'ya kadar çıkar
 
 if __name__ == "__main__":
     main()
