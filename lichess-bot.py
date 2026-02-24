@@ -104,7 +104,10 @@ class OxydanAegisV4:
             except: pass
 
         # 3. MOTOR
-        engine = self.engine_pool.get()
+        try:
+            engine = self.engine_pool.get(timeout=5) # 5 saniye içinde motor alamazsa hata verir
+        except queue.Empty:
+            print("🚨 KRİTİK: Motor havuzu boşaldı, hamle yapılamıyor!")
         try:
             my_inc = self.to_seconds(winc if board.turn == chess.WHITE else binc)
             think_time = self.calculate_smart_time(my_time, my_inc, board)
