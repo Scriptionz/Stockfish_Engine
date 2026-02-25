@@ -39,7 +39,7 @@ matchmaking:
   max_games: 2            # 2 motorlu sistemin ana sınırı
   
   # --- ELO KORUMA FİLTRESİ ---
-  opponent_min_rating: 2250      # 2735 puandasın, alt seviyeyle puan kaybetme riskini sıfırlıyoruz
+  opponent_min_rating: 1500      # 2735 puandasın, alt seviyeyle puan kaybetme riskini sıfırlıyoruz
   opponent_max_rating: 4000      # En üst seviyedeki devleri hedefliyoruz
   opponent_rating_difference: 700 
 
