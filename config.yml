@@ -8,7 +8,7 @@ engine:
   uci_options:
     Threads: 1            # 2 motor için toplam 2 thread (2 çekirdekli sistemde her motora 1 saf çekirdek)
     Hash: 512             # 2 motor x 256MB = 512MB RAM. Hafıza derinliği için ideal.
-    MoveOverhead: 500    # Lag koruması. Uzun maçlarda (30+0) risk almamak için 2 saniye pay.
+    MoveOverhead: 300    # Lag koruması. Uzun maçlarda (30+0) risk almamak için 2 saniye pay.
     Ponder: false         # Rakip düşünürken CPU'yu yormasın, diğer motorun performansını çalmasın.
     SyzygyPath: "./syzygy"
     SyzygyProbeDepth: 1
