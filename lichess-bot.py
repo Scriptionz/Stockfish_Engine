@@ -28,7 +28,7 @@ SETTINGS = {
     "TABLEBASE_PIECE_LIMIT": 7,
     "MIN_THINK_TIME": 0,
     
-    "GREETING": "Oxybullet 2 On The Board!",
+    "GREETING": "Void 2 On The Board!",
 }
 
 # Aynı rakiple kaç maç yapılabileceği sınırı
@@ -68,14 +68,57 @@ class OxydanAegisV4:
         except: return 0.0
 
     def calculate_smart_time(self, t, inc, board):
-        if t < 1.0: return 0.005 
-        target_time = 0.06 
+        """
+        Void 2: İnsansı Zaman Yönetimi.
+        Pozisyonun karmaşıklığına göre süre yakar.
+        """
+        if t < 2.0: # Panik modu (2 saniyenin altı)
+            return max(0.1, t / 10)
+
+        # 1. Temel bölücü (Oyunun hangi aşamasındayız?)
+        # Maçın başında ve ortasında (ilk 40 hamle) daha derin düşün.
+        move_count = len(board.move_stack)
+        if move_count < 15:
+            divider = 25  # Açılışta biraz daha hızlı (kitap dışı kalırsa)
+        elif move_count < 40:
+            divider = 20  # Oyun ortası: EN DERİN DÜŞÜNME (Süreyi burada yak)
+        else:
+            divider = 35  # Oyun sonu: Daha pratik
+
+        # 2. Pozisyonel Gerginlik Analizi (Extra süre yakma tetikleyicisi)
+        # Tahtadaki yasal hamle sayısı ve taşların birbirini tehdit etme durumu
+        tension_bonus = 1.0
+        legal_moves = board.legal_moves.count()
+        
+        # Eğer çok fazla seçenek varsa veya merkezde büyük bir taş kapışması varsa
+        if legal_moves > 35:
+            tension_bonus += 0.5  # Karar vermek zor, %50 ek süre harca
+        
+        # 3. İnsansı Rastgelelik (Bluff/Düşünme taklidi)
+        # Her zaman aynı hızda oynamasın
+        random_factor = random.uniform(0.8, 1.2)
+
+        # Hesaplama
+        base_time = (t / divider) * tension_bonus * random_factor
+        
+        # Artış (increment) yönetimi
+        inc_part = inc * 0.6 
+        
+        target_time = base_time + inc_part
+
+        # 4. Üst Limit (Bir hamlede tüm süreyi gömme)
+        # 10 dakikalık maçta tek hamleye 45 saniyeden fazla harcamasın.
+        hard_limit = min(t * 0.15, 45.0) 
+        
+        final_time = min(target_time, hard_limit)
+        
+        # Gecikme payı
         buffer = SETTINGS.get("LATENCY_BUFFER", 0.05)
-        final_time = target_time - buffer
-        return max(0.01, final_time)
+        return max(0.2, final_time - buffer)
 
     def get_best_move(self, board, wtime, btime, winc, binc):
-        # 1. KİTAP
+        """Void 2: Stockfish Entegreli Hamle Seçici"""
+        # 1. KİTAP (Opsiyonel: Void bazen kitapsız daha yaratıcı olabilir)
         if os.path.exists(SETTINGS["BOOK_PATH"]):
             try:
                 with chess.polyglot.open_reader(SETTINGS["BOOK_PATH"]) as reader:
@@ -93,16 +136,21 @@ class OxydanAegisV4:
                     if data.get("moves"): return chess.Move.from_uci(data["moves"][0]["uci"])
             except: pass
 
-        # 3. MOTOR
+        # 3. STOCKFISH MOTORU
         engine = self.engine_pool.get()
         try:
             my_time = self.to_seconds(wtime if board.turn == chess.WHITE else btime)
             my_inc = self.to_seconds(winc if board.turn == chess.WHITE else binc)
+            
             think_time = self.calculate_smart_time(my_time, my_inc, board)
+            
+            # Void 2: Derinlik (depth) yerine zaman limitiyle kaliteyi artırıyoruz
+            # Stockfish bu sürede max derinliğe ulaşacaktır.
             result = engine.play(board, chess.engine.Limit(time=think_time))
             return result.move
         except Exception as e:
-            print(f"🚨 Motor Hatası: {e}"); return next(iter(board.legal_moves))
+            print(f"🚨 Void Motor Hatası: {e}")
+            return next(iter(board.legal_moves))
         finally:
             self.engine_pool.put(engine)
 
