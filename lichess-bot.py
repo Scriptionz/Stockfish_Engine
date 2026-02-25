@@ -69,54 +69,52 @@ class OxydanAegisV4:
         except: return 0.0
 
     def calculate_smart_time(self, t, inc, board):
-        """
-        Void 2: İnsansı Zaman Yönetimi.
-        Pozisyonun karmaşıklığına göre süre yakar.
-        """
-        if t < 2.0: # Panik modu (2 saniyenin altı)
-            return max(0.1, t / 10)
+        # 1. ACİL DURUM KONTROLÜ (Bayrak düşmemesi için)
+        if t < 1.0: return 0.05 + (inc * 0.5) # Neredeyse anında oyna
+        if t < 3.0: return (t / 15) + (inc * 0.8)
 
-        # 1. Temel bölücü (Oyunun hangi aşamasındayız?)
-        # Maçın başında ve ortasında (ilk 40 hamle) daha derin düşün.
         move_count = len(board.move_stack)
-        if move_count < 15:
-            divider = 25  # Açılışta biraz daha hızlı (kitap dışı kalırsa)
-        elif move_count < 40:
-            divider = 20  # Oyun ortası: EN DERİN DÜŞÜNME (Süreyi burada yak)
+        
+        # 2. BULLET/BLITZ AYRIMI (Otomatik Tespit)
+        # Toplam tahmini süre 2 dakikadan azsa agresif mod
+        total_est = t + (inc * 40)
+        is_fast_game = total_est < 120
+
+        # 3. ÜSTEL BÖLÜCÜ (Curve Management)
+        # Oyun ortasında (20-35. hamleler) zirve yapar, sonra hızlanır.
+        if move_count < 10:
+            divider = 45 if is_fast_game else 35  # Açılışta hız yap
+        elif 10 <= move_count <= 35:
+            divider = 30 if is_fast_game else 22  # EN KRİTİK ANLAR
         else:
-            divider = 35  # Oyun sonu: Daha pratik
+            divider = 50 if is_fast_game else 40  # Oyun sonu bitiricilik
 
-        # 2. Pozisyonel Gerginlik Analizi (Extra süre yakma tetikleyicisi)
-        # Tahtadaki yasal hamle sayısı ve taşların birbirini tehdit etme durumu
-        tension_bonus = 1.0
+        # 4. KOMPLEKSİTE VE GERGİNLİK (Tension)
         legal_moves = board.legal_moves.count()
-        
-        # Eğer çok fazla seçenek varsa veya merkezde büyük bir taş kapışması varsa
-        if legal_moves > 35:
-            tension_bonus += 0.5  # Karar vermek zor, %50 ek süre harca
-        
-        # 3. İnsansı Rastgelelik (Bluff/Düşünme taklidi)
-        # Her zaman aynı hızda oynamasın
-        random_factor = random.uniform(0.8, 1.2)
+        tension_multiplier = 1.0
+        if legal_moves > 40: tension_multiplier = 1.4 # Çok karışık!
+        if legal_moves < 12: tension_multiplier = 0.5 # Zorunlu hamleler veya sadeleşmiş oyun
 
-        # Hesaplama
-        base_time = (t / divider) * tension_bonus * random_factor
+        # 5. HESAPLAMA
+        base_time = (t / divider) * tension_multiplier
+        # Rastgelelik (Bluff faktörü)
+        base_time *= random.uniform(0.85, 1.15)
         
-        # Artış (increment) yönetimi
-        inc_part = inc * 0.6 
+        # Artışın (increment) ne kadarını kullanacağız?
+        inc_usage = 0.8 if is_fast_game else 0.6
         
-        target_time = base_time + inc_part
+        final_time = base_time + (inc * inc_usage)
 
-        # 4. Üst Limit (Bir hamlede tüm süreyi gömme)
-        # 10 dakikalık maçta tek hamleye 45 saniyeden fazla harcamasın.
-        hard_limit = min(t * 0.15, 45.0) 
+        # 6. GÜVENLİK SINIRLARI (Hard Limits)
+        # Ne kadar karmaşık olursa olsun tek hamlede kalan sürenin %12'sinden fazlasını verme
+        max_pct = 0.12 if is_fast_game else 0.18
+        hard_limit = t * max_pct
         
-        final_time = min(target_time, hard_limit)
+        final_time = min(final_time, hard_limit, 40.0)
         
-        # Gecikme payı
-        buffer = SETTINGS.get("LATENCY_BUFFER", 0.05)
-        return max(0.2, final_time - buffer)
-
+        buffer = SETTINGS.get("LATENCY_BUFFER", 0.04)
+        return max(0.12, final_time - buffer)
+        
     def get_best_move(self, board, wtime, btime, winc, binc):
         """Void 2: Stockfish Entegreli Hamle Seçici"""
         # 1. KİTAP (Opsiyonel: Void bazen kitapsız daha yaratıcı olabilir)
@@ -158,19 +156,24 @@ class OxydanAegisV4:
 def is_challenge_acceptable(challenge):
     """
     Oxybullet Protokol Denetleyici (Fedai Mekanizması)
+    Yazışmalı ve Süresiz maç engellemesi eklendi.
     """
     challenger = challenge.get('challenger')
     if not challenger: return False, "Generic challenge"
+
+    # --- YAZIŞMALI/SÜRESİZ ENGELİ (YENİ) ---
+    speed = challenge.get('speed')
+    time_control = challenge.get('timeControl', {})
+    limit = time_control.get('limit') # None ise süresizdir
+
+    if speed in ['correspondence', 'unlimited'] or limit is None:
+        return False, "Void Protocol: Correspondence/Unlimited games are not supported"
+    # ---------------------------------------
 
     user_id = challenger['id']
     rating = challenger.get('rating', 0)
     is_bot = challenger.get('title') == 'BOT'
     rated = challenge.get('rated', False)
-    
-    # Zaman Kontrolü (Lichess saniye cinsinden gönderir)
-    time_control = challenge.get('timeControl', {})
-    limit = time_control.get('limit', 0)
-    increment = time_control.get('increment', 0)
     
     # 1. Anti-Farming: Aynı rakiple çok fazla oynama
     if opponent_tracker.get(user_id, 0) >= MAX_GAMES_PER_OPPONENT:
@@ -178,13 +181,13 @@ def is_challenge_acceptable(challenge):
 
     # 2. BOT Protokolü
     if is_bot:
-        # DURUM A: MASTERS (2000+) - Puanlı veya Puansız her şeyi kabul et (Max 30dk)
+        # DURUM A: MASTERS (2000+)
         if rating >= 2000:
             if limit <= 1800: 
                 return True, "Accepted Masters Bot"
             return False, "Masters time limit exceeded (max 30m)"
 
-        # DURUM B: CHALLENGERS (1500 - 2000) - SADECE PUANSIZ (Casual) ve HIZLI (Max 5dk)
+        # DURUM B: CHALLENGERS (1500 - 2000)
         elif 1500 <= rating < 2000:
             if rated: 
                 return False, "Challengers must play Casual (Rating Protection)"
@@ -192,15 +195,12 @@ def is_challenge_acceptable(challenge):
                 return True, "Accepted Casual Challenger"
             return False, "Challenger time limit exceeded (max 5m)"
         
-        # 1500 Altı botları direkt engelle
         return False, "Bot rating too low for protocol"
 
     # 3. İnsan (Human) Protokolü
     else:
-        # İnsanlarla ASLA puanlı oynama (Hileci riskine karşı)
         if rated: 
             return False, "Humans must play Casual"
-        # Max 10+0
         if limit <= 600: 
             return True, "Accepted Casual Human"
         return False, "Human time limit exceeded (max 10+0)"
