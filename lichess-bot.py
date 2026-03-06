@@ -29,7 +29,7 @@ SETTINGS = {
     "TABLEBASE_PIECE_LIMIT": 7,
     "MIN_THINK_TIME": 0,
     
-    "GREETING": "Void 2 On The Board!",
+    "GREETING": "Void 3 On The Board!",
 }
 
 # Aynı rakiple kaç maç yapılabileceği sınırı
@@ -56,7 +56,7 @@ class OxydanAegisV4:
                         try: eng.configure({opt: val})
                         except: pass
                 self.engine_pool.put(eng)
-            print(f"🚀 Oxybullet: {pool_size} Motor Hazır.", flush=True)
+            print(f"🚀 Void: {pool_size} Motor Hazır.", flush=True)
         except Exception as e:
             print(f"KRİTİK HATA: {e}", flush=True); sys.exit(1)
 
@@ -69,178 +69,226 @@ class OxydanAegisV4:
         except: return 0.0
 
     def calculate_smart_time(self, t, inc, board):
-        # 1. ACİL DURUM KONTROLÜ (Bayrak düşmemesi için)
-        if t < 1.0: return 0.05 + (inc * 0.5) # Neredeyse anında oyna
-        if t < 3.0: return (t / 15) + (inc * 0.8)
-
+        # 1. NETWORK & CPU LATENCY (Hayati Önemde)
+        # Lichess pingin 50ms ise, buffer en az 0.07 olmalı.
+        buffer = SETTINGS.get("LATENCY_BUFFER", 0.07)
+        
+        # 2. ULTRA-PANIC MODE (Zaman biterken 'Pre-move' hızı)
+        if t < 0.6: 
+            # 0.6 saniyenin altında motoru salla, en hızlı hamleyi at.
+            return 0.01 
+    
+        if t < 1.5:
+            # Zamanın %10'u + artışın çoğu. Buffer'ı burada agresif kullan.
+            panic_time = (t * 0.10) + (inc * 0.8)
+            return max(0.02, panic_time - buffer)
+    
+        # 3. DINAMIK OYUN TAHMİNİ
         move_count = len(board.move_stack)
-        
-        # 2. BULLET/BLITZ AYRIMI (Otomatik Tespit)
-        # Toplam tahmini süre 2 dakikadan azsa agresif mod
-        total_est = t + (inc * 40)
-        is_fast_game = total_est < 120
-
-        # 3. ÜSTEL BÖLÜCÜ (Curve Management)
-        # Oyun ortasında (20-35. hamleler) zirve yapar, sonra hızlanır.
-        if move_count < 10:
-            divider = 45 if is_fast_game else 35  # Açılışta hız yap
-        elif 10 <= move_count <= 35:
-            divider = 30 if is_fast_game else 22  # EN KRİTİK ANLAR
+        # Oyun ilerledikçe (move_count arttıkça) kalan hamle tahminini azalt
+        # Bu, botun oyun sonuna süre saklamasını ama oyun sonunda da hızlanmasını sağlar.
+        if move_count < 20:
+            moves_to_go = 40
+        elif move_count < 40:
+            moves_to_go = 25
         else:
-            divider = 50 if is_fast_game else 40  # Oyun sonu bitiricilik
-
-        # 4. KOMPLEKSİTE VE GERGİNLİK (Tension)
+            moves_to_go = 15
+    
+        # 4. TENSION & COMPLEXITY (AI Gözüyle Tahta)
         legal_moves = board.legal_moves.count()
-        tension_multiplier = 1.0
-        if legal_moves > 40: tension_multiplier = 1.4 # Çok karışık!
-        if legal_moves < 12: tension_multiplier = 0.5 # Zorunlu hamleler veya sadeleşmiş oyun
-
-        # 5. HESAPLAMA
-        base_time = (t / divider) * tension_multiplier
-        # Rastgelelik (Bluff faktörü)
-        base_time *= random.uniform(0.85, 1.15)
+        # Çok hamle varsa tahta karışıktır, biraz daha düşün. 
+        # Az hamle varsa (zorunlu hamleler) saniyeler harcama.
+        tension = 0.7 + (legal_moves / 40.0) 
+    
+        # 5. ANA HESAPLAMA
+        # Kalan süreyi tahmini hamle sayısına böl ve gerginlikle çarp
+        base_time = (t / moves_to_go) * tension
         
-        # Artışın (increment) ne kadarını kullanacağız?
-        inc_usage = 0.8 if is_fast_game else 0.6
-        
-        final_time = base_time + (inc * inc_usage)
-
-        # 6. GÜVENLİK SINIRLARI (Hard Limits)
-        # Ne kadar karmaşık olursa olsun tek hamlede kalan sürenin %12'sinden fazlasını verme
-        max_pct = 0.12 if is_fast_game else 0.18
-        hard_limit = t * max_pct
-        
-        final_time = min(final_time, hard_limit, 40.0)
-        
-        buffer = SETTINGS.get("LATENCY_BUFFER", 0.04)
-        return max(0.12, final_time - buffer)
+        # 6. INC (ARTIŞ) YÖNETİMİ
+        # Artış süresini (inc) "bedava süre" olarak görme, onu can simidi yap.
+        final_time = base_time + (inc * 0.7)
+    
+        # 7. ÜST LİMİTLER (Aşırı düşünmeyi engelle)
+        # Asla toplam sürenin %8'inden fazlasını tek hamlede harcama.
+        # 1 dakikan varken tek hamlede 10 saniye düşünmek intihardır.
+        max_allowed = t * 0.08
+        final_time = min(final_time, max_allowed, 12.0)
+    
+        # 8. SON DOKUNUŞ: RANDOM BLUFF
+        # Botun her hamleyi aynı sürede yapması "insansı" olmadığını ele verir.
+        # %15 varyasyon ekle.
+        final_time *= random.uniform(0.85, 1.15)
+    
+        return max(0.03, final_time - buffer)
         
     def get_best_move(self, board, wtime, btime, winc, binc):
-        """Void 2: Stockfish Entegreli Hamle Seçici"""
-        # 1. KİTAP (Opsiyonel: Void bazen kitapsız daha yaratıcı olabilir)
+        """Void & Oxydan: Stabilize Edilmiş Hamle Seçici"""
+        
+        # 1. AÇILIŞ KİTABI (Hızlı Yanıt)
         if os.path.exists(SETTINGS["BOOK_PATH"]):
             try:
                 with chess.polyglot.open_reader(SETTINGS["BOOK_PATH"]) as reader:
-                    entry = reader.get(board)
-                    if entry: return entry.move
-            except: pass
-
-        # 2. TABLEBASE
+                    # Kitaptan rastgele bir hamle seçmek daha doğal durur
+                    entries = list(reader.find_all(board))
+                    if entries:
+                        return random.choice(entries).move
+            except Exception:
+                pass # Kitap okuma hatası stabiliteyi bozmasın
+    
+        # 2. TABLEBASE (Ağ Gecikmesi Korumalı)
         if len(board.piece_map()) <= SETTINGS["TABLEBASE_PIECE_LIMIT"]:
             try:
+                # Lichess API talebi (Yalnızca stabilite için timeout 0.2'ye çekildi)
                 fen = board.fen().replace(" ", "_")
-                r = requests.get(f"https://tablebase.lichess.ovh/standard?fen={fen}", timeout=0.3)
+                r = requests.get(
+                    f"https://tablebase.lichess.ovh/standard?fen={fen}", 
+                    timeout=0.2 # Gecikmeyi önlemek için daha agresif timeout
+                )
                 if r.status_code == 200:
                     data = r.json()
-                    if data.get("moves"): return chess.Move.from_uci(data["moves"][0]["uci"])
-            except: pass
-
-        # 3. STOCKFISH MOTORU
-        engine = self.engine_pool.get()
+                    if data.get("moves"):
+                        return chess.Move.from_uci(data["moves"][0]["uci"])
+            except Exception:
+                pass # İnternet kesintisi veya timeout durumunda motora geç
+    
+        # 3. STOCKFISH MOTORU (Güvenli Havuz Yönetimi)
+        engine = None
         try:
+            engine = self.engine_pool.get()
+            
+            # Süre dönüşümleri
             my_time = self.to_seconds(wtime if board.turn == chess.WHITE else btime)
             my_inc = self.to_seconds(winc if board.turn == chess.WHITE else binc)
             
+            # Daha önce onardığımız v4.0 Smart Time algoritması
             think_time = self.calculate_smart_time(my_time, my_inc, board)
             
-            # Void 2: Derinlik (depth) yerine zaman limitiyle kaliteyi artırıyoruz
-            # Stockfish bu sürede max derinliğe ulaşacaktır.
+            # Motor limiti: Hem süre hem de güvenlik için çok kısa bir minimum derinlik
+            # Bu, aşırı hızlı maçlarda motorun illegal hamle üretmesini engeller.
             result = engine.play(board, chess.engine.Limit(time=think_time))
-            return result.move
+            
+            if result.move:
+                return result.move
+                
         except Exception as e:
-            print(f"🚨 Void Motor Hatası: {e}")
-            return next(iter(board.legal_moves))
-        finally:
-            self.engine_pool.put(engine)
-
-def is_challenge_acceptable(challenge):
-    """
-    Oxybullet Protokol Denetleyici (Fedai Mekanizması)
-    Yazışmalı ve Süresiz maç engellemesi eklendi.
-    """
-    challenger = challenge.get('challenger')
-    if not challenger: return False, "Generic challenge"
-
-    # --- YAZIŞMALI/SÜRESİZ ENGELİ (YENİ) ---
-    speed = challenge.get('speed')
-    time_control = challenge.get('timeControl', {})
-    limit = time_control.get('limit') # None ise süresizdir
-
-    if speed in ['correspondence', 'unlimited'] or limit is None:
-        return False, "Void Protocol: Correspondence/Unlimited games are not supported"
-    # ---------------------------------------
-
-    user_id = challenger['id']
-    rating = challenger.get('rating', 0)
-    is_bot = challenger.get('title') == 'BOT'
-    rated = challenge.get('rated', False)
-    
-    # 1. Anti-Farming: Aynı rakiple çok fazla oynama
-    if opponent_tracker.get(user_id, 0) >= MAX_GAMES_PER_OPPONENT:
-        return False, "Too many games recently"
-
-    # 2. BOT Protokolü
-    if is_bot:
-        # DURUM A: MASTERS (2000+)
-        if rating >= 2000:
-            if limit <= 1800: 
-                return True, "Accepted Masters Bot"
-            return False, "Masters time limit exceeded (max 30m)"
-
-        # DURUM B: CHALLENGERS (1500 - 2000)
-        elif 1500 <= rating < 2000:
-            if rated: 
-                return False, "Challengers must play Casual (Rating Protection)"
-            if limit <= 300: 
-                return True, "Accepted Casual Challenger"
-            return False, "Challenger time limit exceeded (max 5m)"
+            print(f"🚨 Motor Hatası ({board.fen()}): {e}")
         
-        return False, "Bot rating too low for protocol"
+        finally:
+            # Motorun havuza geri dönmesini garanti altına alıyoruz
+            if engine:
+                self.engine_pool.put(engine)
+    
+        # 4. SON ÇARE (Acil Durum Hamlesi)
+        # Eğer her şey çökerse, rastgele bir hamle yerine merkezi kontrol eden veya 
+        # ilk yasal hamleyi döndür.
+        return next(iter(board.legal_moves))
 
-    # 3. İnsan (Human) Protokolü
-    else:
-        if rated: 
-            return False, "Humans must play Casual"
-        if limit <= 600: 
-            return True, "Accepted Casual Human"
-        return False, "Human time limit exceeded (max 10+0)"
-
-    return False, "Unknown protocol violation"
-
+    def is_challenge_acceptable(challenge):
+        # --- YENİ VARYANT FİLTRESİ ---
+        # Sadece 'standard' ve 'chess960' varyantlarını kabul et
+        variant = challenge.get('variant', {}).get('key')
+        if variant not in ['standard', 'chess960']:
+            return False, f"Variant '{variant}' is not supported."
+        # -----------------------------
+    
+        challenger = challenge.get('challenger')
+        if not challenger: 
+            return False, "Generic challenge"
+    
+        # GÜNCELLEME: None gelirse 1500'e yuvarla
+        rating = challenger.get('rating') or 1500
+        # GÜNCELLEME: Title yoksa string metotları hata vermesin diye boş string yap
+        title = challenger.get('title', '') or ''
+        is_bot = title.upper() == 'BOT'
+        
+        rated = challenge.get('rated', False)
+        user_id = challenger['id']
+    
+        time_control = challenge.get('timeControl', {})
+        tc_type = time_control.get('type')
+    
+        if tc_type != 'clock':
+            return False, "Only standard clock games allowed"
+    
+        limit = time_control.get('limit', 0)
+        increment = time_control.get('increment', 0)
+        total_est_time = limit + (increment * 40)
+    
+        # Global değişken kontrolü
+        try:
+            if opponent_tracker.get(user_id, 0) >= MAX_GAMES_PER_OPPONENT:
+                return False, "Too many games recently"
+        except NameError:
+            pass
+    
+        # --- Protokoller ---
+        if is_bot:
+            if rating >= 2000:
+                if total_est_time <= 1800: return True, "Accepted Masters Bot"
+                return False, "Total time too long for Masters"
+            elif 1500 <= rating < 2000:
+                if rated: return False, "Challengers must play Casual"
+                if total_est_time <= 300: return True, "Accepted Casual Challenger"
+                return False, "Total time too long for Challenger"
+            return False, "Bot rating too low"
+        else:
+            if rated: return False, "Humans must play Casual"
+            if total_est_time <= 600: return True, "Accepted Casual Human"
+            return False, "Human time limit exceeded"
+            
 def handle_game(client, game_id, bot, my_id):
     try:
         client.bots.post_message(game_id, SETTINGS["GREETING"])
         stream = client.bots.stream_game_state(game_id)
+        
+        board = chess.Board()
         my_color = None
+        last_move_count = 0
 
         for state in stream:
             if 'error' in state: break
+            
             if state['type'] == 'gameFull':
                 my_color = chess.WHITE if state['white'].get('id') == my_id else chess.BLACK
-                # Rakibi takip listesine ekle
                 opp_id = state['black']['id'] if my_color == chess.WHITE else state['white']['id']
                 opponent_tracker[opp_id] = opponent_tracker.get(opp_id, 0) + 1
                 curr_state = state['state']
             elif state['type'] == 'gameState':
                 curr_state = state
-            else: continue
+            else:
+                continue
 
+            # SADECE YENİ HAMLELERİ GÜNCELLE (Performans Kilidi)
             moves = curr_state.get('moves', "").split()
-            board = chess.Board()
-            for m in moves: board.push_uci(m)
+            if len(moves) > last_move_count:
+                for m in moves[last_move_count:]:
+                    board.push_uci(m)
+                last_move_count = len(moves)
 
+            # Oyun bitiş kontrolü
             if curr_state.get('status') in ['mate', 'resign', 'draw', 'outoftime', 'aborted', 'stalemate']:
                 break
 
+            # Hamle sırası bizde mi?
             if board.turn == my_color and not board.is_game_over():
-                move = bot.get_best_move(board, curr_state.get('wtime'), curr_state.get('btime'), 
-                                        curr_state.get('winc'), curr_state.get('binc'))
+                # get_best_move zaten calculate_smart_time'ı çağırıyor
+                move = bot.get_best_move(
+                    board, 
+                    curr_state.get('wtime'), 
+                    curr_state.get('btime'), 
+                    curr_state.get('winc'), 
+                    curr_state.get('binc')
+                )
+                
                 if move:
-                    for attempt in range(3):
+                    # Hamle gönderme (Daha hızlı retry)
+                    for _ in range(3):
                         try:
                             client.bots.make_move(game_id, move.uci())
-                            break 
-                        except: time.sleep(0.5)
+                            break
+                        except Exception:
+                            time.sleep(0.05) # 0.5 yerine 0.05 (Hayati)
+
     except Exception as e:
         print(f"🚨 Oyun Hatası ({game_id}): {e}", flush=True)
 
@@ -268,9 +316,10 @@ def main():
 
     print(f"🔥 Oxybullet 2 Hazır. ID: {my_id}", flush=True)
 
-    # ANA DÖNGÜ: Bağlantı kopsa da tazeleyerek devam eder
+    # ANA DÖNGÜ: Bağlantı kopsa da jeneratörü her seferinde yeniden tanımlayarak tazeler
     while True:
         try:
+            # Jeneratörü try bloğu içine aldık, böylece hata anında yeniden oluşturulur
             for event in client.bots.stream_incoming_events():
                 cur_elapsed = time.time() - start_time
                 should_stop = os.path.exists("STOP.txt") or cur_elapsed > SETTINGS["MAX_TOTAL_RUNTIME"]
@@ -284,7 +333,8 @@ def main():
                         client.challenges.accept(ch_id)
                     else:
                         client.challenges.decline(ch_id, reason='later' if accept else 'policy')
-                        if should_stop and len(active_games) == 0: sys.exit(0)
+                        # Güvenli çıkış: Eğer durdurulmak isteniyorsa ve oyun yoksa, anında kapat
+                        if should_stop and len(active_games) == 0: os._exit(0)
 
                 elif event['type'] == 'gameStart':
                     game_id = event['game']['id']
