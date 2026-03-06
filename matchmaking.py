@@ -156,8 +156,14 @@ class Matchmaker:
         return None, 0
 
     def start(self):
-        if not self.enabled: return
-        print(f"🚀 OxyBullet Hybrid Manager Aktif. (Matchmaking + Tournament)")
+        """Botun ana çalışma döngüsü."""
+        if not self.enabled: 
+            return
+        
+        print(f"🚀 Void 3 Hybrid Manager Aktif. (Matchmaking + Tournament)")
+        
+        # Değişkeni döngü dışına tanımlayarak 'referenced before assignment' hatasını engelliyoruz
+        last_cleanup_time = time.time()
 
         while True:
             try:
@@ -166,11 +172,10 @@ class Matchmaker:
                     self._cleanup_history()
                     last_cleanup_time = time.time()
                     
-                # 1. Turnuva Yönetimi: Katılım kontrolleri ve kayıt işlemleri
+                # 1. Turnuva Yönetimi
                 self._manage_tournaments()
 
                 # 2. Güvenlik ve Durum Kontrolü
-                # Eğer bir turnuva maçındaysak, matchmaking'i tamamen durdurup 60 sn bekliyoruz.
                 if self._is_in_tournament_game():
                     print("⚔️ [Matchmaker] Turnuva maçındayım, matchmaking askıya alındı.")
                     time.sleep(60)
@@ -181,12 +186,10 @@ class Matchmaker:
                     continue
 
                 # 3. Klasik Matchmaking Döngüsü
-                # Aynı anda kaç oyun oynanabileceği kontrolü
                 if len(self.active_games) < SETTINGS["MAX_PARALLEL_GAMES"]:
                     target, target_rating = self._find_suitable_target()
                     
                     if target:
-                        # Varyant ve zaman kontrolü belirleme
                         variant = 'chess960' if random.random() < SETTINGS["CHESS960_CHANCE"] else 'standard'
                         tc = random.choice(SETTINGS["TIME_CONTROLS"])
                         t_limit_raw, t_inc = map(float, tc.split('+'))
@@ -202,22 +205,19 @@ class Matchmaker:
                             clock_limit=int(t_limit_raw * 60), 
                             clock_increment=int(t_inc)
                         )
-                        # Bir sonraki davet için güvenli bekleme süresi
                         time.sleep(SETTINGS["SAFETY_LOCK_TIME"])
                     else:
-                        # Uygun rakip bulunamadığında kısa bir dinlenme
                         time.sleep(10)
                 else:
-                    # Kapasite doluysa bekle
                     time.sleep(10)
 
             except Exception as e:
-                # API Limit aşımı (429) veya bağlantı hatası yönetimi
+                # API limit veya ağ hatası durumunda çökmemesi için hata yönetimi
                 error_str = str(e)
                 if "429" in error_str:
                     print(f"⚠️ [Matchmaker] Hız sınırı aşıldı, {self.wait_timeout}sn bekleniyor.")
                     time.sleep(self.wait_timeout)
                     self.wait_timeout = min(self.wait_timeout * 2, 900)
                 else:
-                    print(f"⚠️ [Matchmaker] Hata: {error_str}")
+                    print(f"⚠️ [Matchmaker] Kritik Hata: {error_str}")
                     time.sleep(30)
