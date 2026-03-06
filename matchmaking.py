@@ -39,6 +39,8 @@ class Matchmaker:
         self.wait_timeout = 120
         self._initialize_id()
         self.registered_tournaments = set()
+        self.last_tournament_join = 0
+        self.tournament_cooldown = 3600
 
     def _initialize_id(self):
         try:
@@ -73,35 +75,53 @@ class Matchmaker:
             return False
 
     def _manage_tournaments(self):
-        """Yaklaşan turnuvaları tarar ve uygun olanlara katılır."""
-        if not SETTINGS["AUTO_TOURNAMENT"]: return
+        """Yaklaşan turnuvaları tarar, mola süresini kontrol eder ve uygun olanlara katılır."""
+        
+        # 1. Genel ayar kontrolü
+        if not SETTINGS.get("AUTO_TOURNAMENT", True): 
+            return
+
+        # 2. Mola (Cooldown) kontrolü
+        # Eğer en son turnuvaya katılmamızdan bu yana 'tournament_cooldown' kadar süre geçmediyse işlem yapma
+        if (time.time() - self.last_tournament_join) < self.tournament_cooldown:
+            return
 
         try:
             tourneys = self.client.tournaments.get_all()
             for t in tourneys:
-                # Zaten işlem yapılmışsa atla
-                if t['id'] in self.registered_tournaments: continue
+                # Zaten işlem yapılmışsa (veya katılmışsak) atla
+                if t['id'] in self.registered_tournaments: 
+                    continue
                 
                 # Sadece yaklaşan (created) turnuvaları kontrol et
                 if t.get('status') == 'created':
                     name = t.get('fullName', '').lower()
                     
-                    # Filtre: Sadece bot turnuvaları
-                    if SETTINGS["ONLY_BOT_TOURNEYS"] and "bot" not in name:
+                    # Filtre: Sadece bot turnuvaları mı?
+                    if SETTINGS.get("ONLY_BOT_TOURNEYS", True) and "bot" not in name:
                         continue
                     
                     # Zaman filtresi: Başlamasına SETTINGS["JOIN_UPCOMING_MINS"] dakikadan az kaldıysa katıl
                     starts_at = t.get('startsAt', 0) / 1000 # ms to sec
-                    if (starts_at - time.time()) > (SETTINGS["JOIN_UPCOMING_MINS"] * 60):
+                    if (starts_at - time.time()) > (SETTINGS.get("JOIN_UPCOMING_MINS", 15) * 60):
                         continue
 
+                    # Katılım işlemi
                     self.client.tournaments.join(t['id'])
+                    
+                    # Kayıt sistemini güncelle ve zaman damgasını kaydet
                     self.registered_tournaments.add(t['id'])
+                    self.last_tournament_join = time.time() 
+                    
                     print(f"🏆 [Tournament] Katılındı: {t.get('fullName')}")
+                    print(f"🕒 [Tournament] {self.tournament_cooldown / 60} dakika mola başlatıldı.")
+                    
+                    # Bir turnuvaya katıldıktan sonra döngüyü kır ki aynı anda birden fazla iş yükü oluşmasın
                     break 
+                    
         except Exception as e:
-            print(f"⚠️ [Tournament] Hata: {e}")
-
+            print(f"⚠️ [Tournament] Hata oluştu: {e}")
+            
     def _refresh_bot_pool(self):
         now = time.time()
         if not self.bot_pool or (now - self.last_pool_update > SETTINGS["POOL_REFRESH_SECONDS"]):
