@@ -38,7 +38,7 @@ matchmaking:
   challenge_timeout: 30
   max_games: 2
   
-  # --- Turnuva Ayarları (Yeni Eklenen) ---
+  # --- Turnuva Ayarları ---
   auto_tournament: true
   join_upcoming_mins: 15
   only_bot_tourneys: true
