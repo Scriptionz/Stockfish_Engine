@@ -38,6 +38,7 @@ class Matchmaker:
         self.last_pool_update = 0
         self.wait_timeout = 120
         self._initialize_id()
+        self.registered_tournaments = set()
 
     def _initialize_id(self):
         try:
@@ -62,38 +63,44 @@ class Matchmaker:
             return max(ratings) if ratings else 0
         except: return 0
 
-    # --- Yeni: Turnuva Yönetimi ---
     def _is_in_tournament_game(self):
-        """Botun şu an aktif bir turnuva maçı yapıp yapmadığını kontrol eder."""
+        """Aktif bir turnuva maçında olup olmadığını kontrol eder."""
         try:
             ongoing = self.client.games.get_ongoing()
-            for game in ongoing:
-                if game.get('tournamentId'): return True
+            # ongoing liste olarak döner, herhangi bir turnuva maçı varsa True dön
+            return any(game.get('tournamentId') is not None for game in ongoing)
+        except: 
             return False
-        except: return False
 
     def _manage_tournaments(self):
         """Yaklaşan turnuvaları tarar ve uygun olanlara katılır."""
         if not SETTINGS["AUTO_TOURNAMENT"]: return
 
         try:
-            # Yaklaşan turnuvaları çek
             tourneys = self.client.tournaments.get_all()
             for t in tourneys:
-                # Sadece 'created' (henüz başlamamış) olanları kontrol et
+                # Zaten işlem yapılmışsa atla
+                if t['id'] in self.registered_tournaments: continue
+                
+                # Sadece yaklaşan (created) turnuvaları kontrol et
                 if t.get('status') == 'created':
                     name = t.get('fullName', '').lower()
                     
-                    # Filtre: Sadece bot turnuvaları mı yoksa genel mi?
+                    # Filtre: Sadece bot turnuvaları
                     if SETTINGS["ONLY_BOT_TOURNEYS"] and "bot" not in name:
                         continue
+                    
+                    # Zaman filtresi: Başlamasına SETTINGS["JOIN_UPCOMING_MINS"] dakikadan az kaldıysa katıl
+                    starts_at = t.get('startsAt', 0) / 1000 # ms to sec
+                    if (starts_at - time.time()) > (SETTINGS["JOIN_UPCOMING_MINS"] * 60):
+                        continue
 
-                    # Zaten kayıtlı değilsek katıl
                     self.client.tournaments.join(t['id'])
-                    print(f"🏆 [Tournament] Kayıt başarılı: {t.get('fullName')}")
+                    self.registered_tournaments.add(t['id'])
+                    print(f"🏆 [Tournament] Katılındı: {t.get('fullName')}")
                     break 
         except Exception as e:
-            print(f"⚠️ [Tournament] Kayıt hatası: {e}")
+            print(f"⚠️ [Tournament] Hata: {e}")
 
     def _refresh_bot_pool(self):
         now = time.time()
@@ -126,44 +133,59 @@ class Matchmaker:
         print(f"🚀 OxyBullet Hybrid Manager Aktif. (Matchmaking + Tournament)")
 
         while True:
-            # 1. Turnuva Kayıt Kontrolü
-            self._manage_tournaments()
-
-            # 2. Kritik Kontrol: Eğer turnuvadaysak matchmaking'i durdur
-            if self._is_in_tournament_game():
-                time.sleep(30) # Turnuva maçının bitmesini bekle
-                continue
-
-            if self._is_stop_triggered():
-                time.sleep(15); continue
-
-            # 3. Klasik Matchmaking Döngüsü
-            if len(self.active_games) >= SETTINGS["MAX_PARALLEL_GAMES"]:
-                time.sleep(10); continue
-
             try:
-                target, target_rating = self._find_suitable_target()
-                if not target:
-                    time.sleep(5); continue
+                # 1. Turnuva Yönetimi: Katılım kontrolleri ve kayıt işlemleri
+                self._manage_tournaments()
 
-                variant = 'chess960' if random.random() < SETTINGS["CHESS960_CHANCE"] else 'standard'
-                tc = random.choice(SETTINGS["TIME_CONTROLS"])
-                t_limit_raw, t_inc = map(float, tc.split('+'))
-                is_rated = SETTINGS["RATED_MODE"]
-                if target_rating < 1800: is_rated = False 
+                # 2. Güvenlik ve Durum Kontrolü
+                # Eğer bir turnuva maçındaysak, matchmaking'i tamamen durdurup 60 sn bekliyoruz.
+                if self._is_in_tournament_game():
+                    print("⚔️ [Matchmaker] Turnuva maçındayım, matchmaking askıya alındı.")
+                    time.sleep(60)
+                    continue
 
-                print(f"[Matchmaker] -> {target} ({target_rating}) Davet ediliyor...")
-                self.blacklist[target] = datetime.now() + timedelta(minutes=SETTINGS["BLACKLIST_MINUTES"])
-                
-                self.client.challenges.create(
-                    username=target, rated=is_rated, variant=variant,
-                    clock_limit=int(t_limit_raw * 60), clock_increment=int(t_inc)
-                )
-                time.sleep(SETTINGS["SAFETY_LOCK_TIME"]) 
+                if self._is_stop_triggered():
+                    time.sleep(15)
+                    continue
+
+                # 3. Klasik Matchmaking Döngüsü
+                # Aynı anda kaç oyun oynanabileceği kontrolü
+                if len(self.active_games) < SETTINGS["MAX_PARALLEL_GAMES"]:
+                    target, target_rating = self._find_suitable_target()
+                    
+                    if target:
+                        # Varyant ve zaman kontrolü belirleme
+                        variant = 'chess960' if random.random() < SETTINGS["CHESS960_CHANCE"] else 'standard'
+                        tc = random.choice(SETTINGS["TIME_CONTROLS"])
+                        t_limit_raw, t_inc = map(float, tc.split('+'))
+                        is_rated = SETTINGS["RATED_MODE"] if target_rating >= 1800 else False
+                        
+                        print(f"[Matchmaker] -> {target} ({target_rating}) davet ediliyor...")
+                        self.blacklist[target] = datetime.now() + timedelta(minutes=SETTINGS["BLACKLIST_MINUTES"])
+                        
+                        self.client.challenges.create(
+                            username=target, 
+                            rated=is_rated, 
+                            variant=variant,
+                            clock_limit=int(t_limit_raw * 60), 
+                            clock_increment=int(t_inc)
+                        )
+                        # Bir sonraki davet için güvenli bekleme süresi
+                        time.sleep(SETTINGS["SAFETY_LOCK_TIME"])
+                    else:
+                        # Uygun rakip bulunamadığında kısa bir dinlenme
+                        time.sleep(10)
+                else:
+                    # Kapasite doluysa bekle
+                    time.sleep(10)
 
             except Exception as e:
-                if "429" in str(e):
+                # API Limit aşımı (429) veya bağlantı hatası yönetimi
+                error_str = str(e)
+                if "429" in error_str:
+                    print(f"⚠️ [Matchmaker] Hız sınırı aşıldı, {self.wait_timeout}sn bekleniyor.")
                     time.sleep(self.wait_timeout)
                     self.wait_timeout = min(self.wait_timeout * 2, 900)
                 else:
-                    time.sleep(10)
+                    print(f"⚠️ [Matchmaker] Hata: {error_str}")
+                    time.sleep(30)
