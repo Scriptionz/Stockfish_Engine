@@ -41,7 +41,7 @@ class Matchmaker:
         self.wait_timeout = 120
         self.registered_tournaments = set()
         self.last_tournament_join = 0
-        self.tournament_cooldown = 3600
+        self.tournament_cooldown = 600
         self.token = token
         self._initialize_id()
 
@@ -86,21 +86,21 @@ class Matchmaker:
     # 🏆 DOĞRUDAN API İLE TURNUVA YÖNETİMİ
     # ==========================================================
     def _fetch_created_tournaments(self):
-        """Lichess API v3 ile oluşturulmuş (başlamamış) turnuvaları çeker."""
-        # Endpoint: https://lichess.org/api/tournament (GET)
         url = "https://lichess.org/api/tournament"
-        headers = {}
+        # User-Agent eklemek Lichess'in bağlantıyı koparmasını engeller
+        headers = {"User-Agent": "OxydanBot/1.0"} 
         if self.token:
             headers["Authorization"] = f"Bearer {self.token}"
             
         try:
             response = requests.get(url, headers=headers, timeout=10)
             if response.status_code == 200:
-                # 'created' listesi henüz başlamamış turnuvaları içerir
-                return response.json().get('created', [])
+                data = response.json()
+                # 'started' ve 'created' listelerini birleştirerek tarama yapalım
+                return data.get('created', []) + data.get('started', [])
             return []
         except Exception as e:
-            print(f"⚠️ [API] Turnuva listesi çekilemedi: {e}")
+            print(f"⚠️ [API] Turnuva listesi çekilemedi (Bağlantı Hatası): {e}")
             return []
 
     def _join_tournament(self, tournament_id):
@@ -119,47 +119,36 @@ class Matchmaker:
             return False
 
     def _manage_tournaments(self):
-        """Yaklaşan turnuvaları tarar, mola süresini kontrol eder ve uygun olanlara katılır."""
+        if not SETTINGS.get("AUTO_TOURNAMENT", True): return
         
-        if not SETTINGS.get("AUTO_TOURNAMENT", True): 
-            return
-
+        # Mola süresini kontrol et
         if (time.time() - self.last_tournament_join) < self.tournament_cooldown:
             return
 
-        try:
-            # Doğrudan API kullanarak turnuvaları çekiyoruz
-            tourneys = self._fetch_created_tournaments()
+        print("[Matchmaker] Yaklaşan turnuvalar taranıyor...") # Log ekledik
+        tourneys = self._fetch_created_tournaments()
+        
+        for t in tourneys:
+            t_id = t.get('id')
+            if t_id in self.registered_tournaments: continue
             
-            for t in tourneys:
-                if t['id'] in self.registered_tournaments: 
-                    continue
-                
-                name = t.get('fullName', '').lower()
-                
-                # Filtre: Sadece bot turnuvaları mı?
-                if SETTINGS.get("ONLY_BOT_TOURNEYS", True) and "bot" not in name:
-                    continue
-                
-                # Zaman filtresi: Başlamasına SETTINGS["JOIN_UPCOMING_MINS"] dakikadan az kaldıysa katıl
-                starts_at = t.get('startsAt', 0) / 1000 # ms to sec
-                if (starts_at - time.time()) > (SETTINGS.get("JOIN_UPCOMING_MINS", 15) * 60):
-                    continue
+            name = t.get('fullName', '').lower()
+            # Filtreyi logla takip edelim
+            if SETTINGS.get("ONLY_BOT_TOURNEYS") and "bot" not in name:
+                continue
 
-                # Katılım işlemi
-                if self._join_tournament(t['id']):
-                    self.registered_tournaments.add(t['id'])
-                    self.last_tournament_join = time.time() 
-                    
-                    print(f"🏆 [Tournament] Katılındı: {t.get('fullName')}")
-                    print(f"🕒 [Tournament] {self.tournament_cooldown / 60} dakika mola başlatıldı.")
-                    
-                    # Bir turnuvaya katıldıktan sonra döngüyü kır
-                    break 
-                    
-        except Exception as e:
-            print(f"⚠️ [Tournament] Hata oluştu: {e}")
+            starts_at = t.get('startsAt', 0) / 1000
+            # Eğer turnuva 15 dakikadan (JOIN_UPCOMING_MINS) daha uzaksa bekle
+            if starts_at > 0 and (starts_at - time.time()) > (SETTINGS.get("JOIN_UPCOMING_MINS", 15) * 60):
+                continue
 
+            # Katılma isteği gönder
+            if self._join_tournament(t_id):
+                self.registered_tournaments.add(t_id)
+                self.last_tournament_join = time.time()
+                print(f"🏆 [Tournament] BAŞARIYLA KATILINDI: {t.get('fullName')}")
+                break
+            
     def _cleanup_history(self):
         """Çok eski turnuva kayıtlarını bellekten atar."""
         if len(self.registered_tournaments) > 500: 
