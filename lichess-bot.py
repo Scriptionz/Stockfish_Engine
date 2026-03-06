@@ -29,7 +29,7 @@ SETTINGS = {
     "TABLEBASE_PIECE_LIMIT": 7,
     "MIN_THINK_TIME": 0,
     
-    "GREETING": "Void 3 On The Board!",
+    "GREETING": "Oxydan 9 On The Board!",
 }
 
 # Aynı rakiple kaç maç yapılabileceği sınırı
@@ -50,7 +50,7 @@ class OxydanAegisV4:
             for i in range(pool_size):
                 eng = chess.engine.SimpleEngine.popen_uci(self.exe_path, timeout=30)
                 # DÜZELTME: MoveOverhead (Bitişik yazım)
-                eng.configure({"Move Overhead": 500}) 
+                eng.configure({"MoveOverhead": 500}) 
                 if uci_options:
                     for opt, val in uci_options.items():
                         try: eng.configure({opt: val})
@@ -182,63 +182,9 @@ class OxydanAegisV4:
         # Eğer her şey çökerse, rastgele bir hamle yerine merkezi kontrol eden veya 
         # ilk yasal hamleyi döndür.
         return next(iter(board.legal_moves))
-
-    def is_challenge_acceptable(challenge, mm_instance=None):
-        if mm_instance and mm_instance.is_in_tournament_game():
-            return False, "I am currently playing a tournament game."
-        # --- YENİ VARYANT FİLTRESİ ---
-        # Sadece 'standard' ve 'chess960' varyantlarını kabul et
-        variant = challenge.get('variant', {}).get('key')
-        if variant not in ['standard', 'chess960']:
-            return False, f"Variant '{variant}' is not supported."
-        # -----------------------------
-    
-        challenger = challenge.get('challenger')
-        if not challenger: 
-            return False, "Generic challenge"
-    
-        # GÜNCELLEME: None gelirse 1500'e yuvarla
-        rating = challenger.get('rating') or 1500
-        # GÜNCELLEME: Title yoksa string metotları hata vermesin diye boş string yap
-        title = challenger.get('title', '') or ''
-        is_bot = title.upper() == 'BOT'
-        
-        rated = challenge.get('rated', False)
-        user_id = challenger['id']
-    
-        time_control = challenge.get('timeControl', {})
-        tc_type = time_control.get('type')
-    
-        if tc_type != 'clock':
-            return False, "Only standard clock games allowed"
-    
-        limit = time_control.get('limit', 0)
-        increment = time_control.get('increment', 0)
-        total_est_time = limit + (increment * 40)
-    
-        # Global değişken kontrolü
-        try:
-            if opponent_tracker.get(user_id, 0) >= MAX_GAMES_PER_OPPONENT:
-                return False, "Too many games recently"
-        except NameError:
-            pass
-    
-        # --- Protokoller ---
-        if is_bot:
-            if rating >= 2000:
-                if total_est_time <= 1800: return True, "Accepted Masters Bot"
-                return False, "Total time too long for Masters"
-            elif 1500 <= rating < 2000:
-                if rated: return False, "Challengers must play Casual"
-                if total_est_time <= 300: return True, "Accepted Casual Challenger"
-                return False, "Total time too long for Challenger"
-            return False, "Bot rating too low"
-        else:
-            if rated: return False, "Humans must play Casual"
-            if total_est_time <= 600: return True, "Accepted Casual Human"
-            return False, "Human time limit exceeded"
             
-def handle_game(client, game_id, bot, my_id):
+def handle_game(client, game_id, bot, my_id, mm):
+    """Oyun mantığını yöneten ana fonksiyon. mm parametresi eklendi."""
     try:
         client.bots.post_message(game_id, SETTINGS["GREETING"])
         stream = client.bots.stream_game_state(game_id)
@@ -253,27 +199,29 @@ def handle_game(client, game_id, bot, my_id):
             if state['type'] == 'gameFull':
                 my_color = chess.WHITE if state['white'].get('id') == my_id else chess.BLACK
                 opp_id = state['black']['id'] if my_color == chess.WHITE else state['white']['id']
-                opponent_tracker[opp_id] = opponent_tracker.get(opp_id, 0) + 1
+                
+                # DÜZELTME: Takibi Matchmaker nesnesi üzerinden yapıyoruz
+                if mm:
+                    mm.opponent_tracker[opp_id] = mm.opponent_tracker.get(opp_id, 0) + 1
+                
                 curr_state = state['state']
             elif state['type'] == 'gameState':
                 curr_state = state
             else:
                 continue
 
-            # SADECE YENİ HAMLELERİ GÜNCELLE (Performans Kilidi)
+            # Hamleleri güncelle
             moves = curr_state.get('moves', "").split()
             if len(moves) > last_move_count:
                 for m in moves[last_move_count:]:
                     board.push_uci(m)
                 last_move_count = len(moves)
 
-            # Oyun bitiş kontrolü
             if curr_state.get('status') in ['mate', 'resign', 'draw', 'outoftime', 'aborted', 'stalemate']:
                 break
 
-            # Hamle sırası bizde mi?
+            # Hamle sırası kontrolü
             if board.turn == my_color and not board.is_game_over():
-                # get_best_move zaten calculate_smart_time'ı çağırıyor
                 move = bot.get_best_move(
                     board, 
                     curr_state.get('wtime'), 
@@ -283,28 +231,32 @@ def handle_game(client, game_id, bot, my_id):
                 )
                 
                 if move:
-                    # Hamle gönderme (Daha hızlı retry)
                     for _ in range(3):
                         try:
                             client.bots.make_move(game_id, move.uci())
                             break
                         except Exception:
-                            time.sleep(0.05) # 0.5 yerine 0.05 (Hayati)
+                            time.sleep(0.05)
 
     except Exception as e:
         print(f"🚨 Oyun Hatası ({game_id}): {e}", flush=True)
 
-def handle_game_wrapper(client, game_id, bot, my_id, active_games):
-    try: handle_game(client, game_id, bot, my_id)
-    finally: active_games.discard(game_id)
+def handle_game_wrapper(client, game_id, bot, my_id, active_games, mm):
+    """Thread başlatıcı. mm parametresi handle_game'e aktarılıyor."""
+    try: 
+        handle_game(client, game_id, bot, my_id, mm) # mm buraya eklendi!
+    finally: 
+        active_games.discard(game_id)
 
 def main():
+    """Botun ana döngüsü ve Matchmaker entegrasyonu."""
     start_time = time.time()
     session = berserk.TokenSession(SETTINGS["TOKEN"])
     client = berserk.Client(session=session)
     
     try:
-        with open("config.yml", "r") as f: config = yaml.safe_load(f)
+        with open("config.yml", "r") as f: 
+            config = yaml.safe_load(f)
         my_id = client.account.get()['id']
     except Exception as e:
         print(f"Bağlantı Hatası: {e}"); return
@@ -312,17 +264,18 @@ def main():
     bot = OxydanAegisV4(SETTINGS["ENGINE_PATH"], uci_options=config.get('engine', {}).get('uci_options', {}))
     active_games = set() 
     
-    # Matchmaker nesnesini başlat (mm burada tanımlanmalı)
+    # lichess-bot.py içerisindeki Matchmaker başlatma kısmını bul ve şöyle düzelt:
+    
     mm = None
     if config.get("matchmaking"):
-        mm = Matchmaker(client, config, active_games) 
+        # Buraya token parametresini ekliyoruz
+        mm = Matchmaker(client, config, active_games, token=SETTINGS["TOKEN"])
         threading.Thread(target=mm.start, daemon=True).start()
 
-    print(f"🔥 Void 3 Hazır. ID: {my_id}", flush=True)
+    print(f"🔥 Oxydan 9 Hazır. ID: {my_id}", flush=True)
 
     while True:
         try:
-            # Jeneratör hatasız devam etsin
             for event in client.bots.stream_incoming_events():
                 cur_elapsed = time.time() - start_time
                 should_stop = os.path.exists("STOP.txt") or cur_elapsed > SETTINGS["MAX_TOTAL_RUNTIME"]
@@ -331,10 +284,11 @@ def main():
                 if event['type'] == 'challenge':
                     ch_id = event['challenge']['id']
                     
-                    # mm nesnesini buraya gönderiyoruz:
-                    accept, reason = is_challenge_acceptable(event['challenge'], mm_instance=mm)
+                    # DÜZELTME: mm nesnesi üzerinden metod çağrısı
+                    accept, reason = True, 'policy'
+                    if mm:
+                        accept, reason = mm.is_challenge_acceptable(event['challenge'])
                     
-                    # Eğer turnuvada değilse ve diğer şartlar uygunsa kabul et
                     if not should_stop and not close_to_end and len(active_games) < SETTINGS["MAX_PARALLEL_GAMES"] and accept:
                         client.challenges.accept(ch_id)
                     else:
@@ -343,13 +297,16 @@ def main():
 
                 elif event['type'] == 'gameStart':
                     game_id = event['game']['id']
-                    # Turnuva maçı mı? Kontrol gerekebilir (gameStart event'i turnuva maçlarında da gelir)
-                    if game_id not in active_games and len(active_games) < SETTINGS["MAX_PARALLEL_GAMES"]:
+                    if game_id not in active_games:
                         active_games.add(game_id)
-                        threading.Thread(target=handle_game_wrapper, args=(client, game_id, bot, my_id, active_games), daemon=True).start()
+                        threading.Thread(
+                            target=handle_game_wrapper, 
+                            args=(client, game_id, bot, my_id, active_games, mm), # Tam argüman listesi
+                            daemon=True
+                        ).start()
 
         except Exception as e:
-            print(f"⚠️ Akış koptu, 5sn içinde tazeleniyor: {e}", flush=True)
+            print(f"⚠️ Akış koptu: {e}", flush=True)
             time.sleep(5)
 
 if __name__ == "__main__":
