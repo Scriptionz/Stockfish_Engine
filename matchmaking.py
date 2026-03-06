@@ -121,6 +121,13 @@ class Matchmaker:
                     
         except Exception as e:
             print(f"⚠️ [Tournament] Hata oluştu: {e}")
+
+    # Matchmaker sınıfına ekle:
+    def _cleanup_history(self):
+        """Çok eski turnuva kayıtlarını bellekten atar."""
+        if len(self.registered_tournaments) > 500: # Kayıt sayısı 500'ü geçerse
+            self.registered_tournaments.clear() # Veya sadece belirli bir yaşa göre temizle
+            print("🧹 [System] Turnuva kayıt hafızası temizlendi.")
             
     def _refresh_bot_pool(self):
         now = time.time()
@@ -154,6 +161,11 @@ class Matchmaker:
 
         while True:
             try:
+                # 0. Bellek temizliği (Her 6 saatte bir kontrol et)
+                if time.time() - last_cleanup_time > 21600:
+                    self._cleanup_history()
+                    last_cleanup_time = time.time()
+                    
                 # 1. Turnuva Yönetimi: Katılım kontrolleri ve kayıt işlemleri
                 self._manage_tournaments()
 
