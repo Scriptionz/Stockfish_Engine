@@ -183,7 +183,9 @@ class OxydanAegisV4:
         # ilk yasal hamleyi döndür.
         return next(iter(board.legal_moves))
 
-    def is_challenge_acceptable(challenge):
+    def is_challenge_acceptable(challenge, mm_instance=None):
+        if mm_instance and mm_instance.is_in_tournament_game():
+            return False, "I am currently playing a tournament game."
         # --- YENİ VARYANT FİLTRESİ ---
         # Sadece 'standard' ve 'chess960' varyantlarını kabul et
         variant = challenge.get('variant', {}).get('key')
@@ -309,17 +311,18 @@ def main():
 
     bot = OxydanAegisV4(SETTINGS["ENGINE_PATH"], uci_options=config.get('engine', {}).get('uci_options', {}))
     active_games = set() 
-
+    
+    # Matchmaker nesnesini başlat (mm burada tanımlanmalı)
+    mm = None
     if config.get("matchmaking"):
         mm = Matchmaker(client, config, active_games) 
         threading.Thread(target=mm.start, daemon=True).start()
 
-    print(f"🔥 Oxybullet 2 Hazır. ID: {my_id}", flush=True)
+    print(f"🔥 Void 3 Hazır. ID: {my_id}", flush=True)
 
-    # ANA DÖNGÜ: Bağlantı kopsa da jeneratörü her seferinde yeniden tanımlayarak tazeler
     while True:
         try:
-            # Jeneratörü try bloğu içine aldık, böylece hata anında yeniden oluşturulur
+            # Jeneratör hatasız devam etsin
             for event in client.bots.stream_incoming_events():
                 cur_elapsed = time.time() - start_time
                 should_stop = os.path.exists("STOP.txt") or cur_elapsed > SETTINGS["MAX_TOTAL_RUNTIME"]
@@ -327,17 +330,20 @@ def main():
 
                 if event['type'] == 'challenge':
                     ch_id = event['challenge']['id']
-                    accept, reason = is_challenge_acceptable(event['challenge'])
                     
+                    # mm nesnesini buraya gönderiyoruz:
+                    accept, reason = is_challenge_acceptable(event['challenge'], mm_instance=mm)
+                    
+                    # Eğer turnuvada değilse ve diğer şartlar uygunsa kabul et
                     if not should_stop and not close_to_end and len(active_games) < SETTINGS["MAX_PARALLEL_GAMES"] and accept:
                         client.challenges.accept(ch_id)
                     else:
                         client.challenges.decline(ch_id, reason='later' if accept else 'policy')
-                        # Güvenli çıkış: Eğer durdurulmak isteniyorsa ve oyun yoksa, anında kapat
                         if should_stop and len(active_games) == 0: os._exit(0)
 
                 elif event['type'] == 'gameStart':
                     game_id = event['game']['id']
+                    # Turnuva maçı mı? Kontrol gerekebilir (gameStart event'i turnuva maçlarında da gelir)
                     if game_id not in active_games and len(active_games) < SETTINGS["MAX_PARALLEL_GAMES"]:
                         active_games.add(game_id)
                         threading.Thread(target=handle_game_wrapper, args=(client, game_id, bot, my_id, active_games), daemon=True).start()
