@@ -2,6 +2,7 @@ import time
 import random
 import itertools
 import os
+import requests
 from datetime import datetime, timedelta
 
 # ==========================================================
@@ -27,7 +28,7 @@ SETTINGS = {
 }
 
 class Matchmaker:
-    def __init__(self, client, config, active_games): 
+    def __init__(self, client, config, active_games, token): 
         self.client = client
         self.config = config.get("matchmaking", {})
         self.enabled = self.config.get("allow_feed", True)
@@ -35,12 +36,14 @@ class Matchmaker:
         self.my_id = None
         self.bot_pool = []
         self.blacklist = {}
+        self.opponent_tracker = {}
         self.last_pool_update = 0
         self.wait_timeout = 120
-        self._initialize_id()
         self.registered_tournaments = set()
         self.last_tournament_join = 0
         self.tournament_cooldown = 3600
+        self.token = token
+        self._initialize_id()
 
     def _initialize_id(self):
         try:
@@ -57,7 +60,7 @@ class Matchmaker:
             return True
         return False
 
-    def _get_bot_rating(self, bot_id, clock_limit): # Parametreyi ekledik
+    def _get_bot_rating(self, bot_id, clock_limit): 
         try:
             # Süreye göre mod belirleme protokolü
             if clock_limit < 180: mode = 'bullet'
@@ -79,60 +82,138 @@ class Matchmaker:
         except: 
             return False
 
+    # ==========================================================
+    # 🏆 DOĞRUDAN API İLE TURNUVA YÖNETİMİ
+    # ==========================================================
+    def _fetch_created_tournaments(self):
+        """Lichess API v3 ile oluşturulmuş (başlamamış) turnuvaları çeker."""
+        # Endpoint: https://lichess.org/api/tournament (GET)
+        url = "https://lichess.org/api/tournament"
+        headers = {}
+        if self.token:
+            headers["Authorization"] = f"Bearer {self.token}"
+            
+        try:
+            response = requests.get(url, headers=headers, timeout=10)
+            if response.status_code == 200:
+                # 'created' listesi henüz başlamamış turnuvaları içerir
+                return response.json().get('created', [])
+            return []
+        except Exception as e:
+            print(f"⚠️ [API] Turnuva listesi çekilemedi: {e}")
+            return []
+
+    def _join_tournament(self, tournament_id):
+        """Lichess API üzerinden turnuvaya katılım isteği (POST)."""
+        # Endpoint: https://lichess.org/api/tournament/{id}/join (POST)
+        url = f"https://lichess.org/api/tournament/{tournament_id}/join"
+        headers = {}
+        if self.token:
+            headers["Authorization"] = f"Bearer {self.token}"
+            
+        try:
+            response = requests.post(url, headers=headers, timeout=10)
+            return response.status_code == 200
+        except Exception as e:
+            print(f"⚠️ [API] Turnuvaya katılınamadı: {e}")
+            return False
+
     def _manage_tournaments(self):
         """Yaklaşan turnuvaları tarar, mola süresini kontrol eder ve uygun olanlara katılır."""
         
-        # 1. Genel ayar kontrolü
         if not SETTINGS.get("AUTO_TOURNAMENT", True): 
             return
 
-        # 2. Mola (Cooldown) kontrolü
-        # Eğer en son turnuvaya katılmamızdan bu yana 'tournament_cooldown' kadar süre geçmediyse işlem yapma
         if (time.time() - self.last_tournament_join) < self.tournament_cooldown:
             return
 
         try:
-            tourneys = self.client.tournaments.get_all()
+            # Doğrudan API kullanarak turnuvaları çekiyoruz
+            tourneys = self._fetch_created_tournaments()
+            
             for t in tourneys:
-                # Zaten işlem yapılmışsa (veya katılmışsak) atla
                 if t['id'] in self.registered_tournaments: 
                     continue
                 
-                # Sadece yaklaşan (created) turnuvaları kontrol et
-                if t.get('status') == 'created':
-                    name = t.get('fullName', '').lower()
-                    
-                    # Filtre: Sadece bot turnuvaları mı?
-                    if SETTINGS.get("ONLY_BOT_TOURNEYS", True) and "bot" not in name:
-                        continue
-                    
-                    # Zaman filtresi: Başlamasına SETTINGS["JOIN_UPCOMING_MINS"] dakikadan az kaldıysa katıl
-                    starts_at = t.get('startsAt', 0) / 1000 # ms to sec
-                    if (starts_at - time.time()) > (SETTINGS.get("JOIN_UPCOMING_MINS", 15) * 60):
-                        continue
+                name = t.get('fullName', '').lower()
+                
+                # Filtre: Sadece bot turnuvaları mı?
+                if SETTINGS.get("ONLY_BOT_TOURNEYS", True) and "bot" not in name:
+                    continue
+                
+                # Zaman filtresi: Başlamasına SETTINGS["JOIN_UPCOMING_MINS"] dakikadan az kaldıysa katıl
+                starts_at = t.get('startsAt', 0) / 1000 # ms to sec
+                if (starts_at - time.time()) > (SETTINGS.get("JOIN_UPCOMING_MINS", 15) * 60):
+                    continue
 
-                    # Katılım işlemi
-                    self.client.tournaments.join(t['id'])
-                    
-                    # Kayıt sistemini güncelle ve zaman damgasını kaydet
+                # Katılım işlemi
+                if self._join_tournament(t['id']):
                     self.registered_tournaments.add(t['id'])
                     self.last_tournament_join = time.time() 
                     
                     print(f"🏆 [Tournament] Katılındı: {t.get('fullName')}")
                     print(f"🕒 [Tournament] {self.tournament_cooldown / 60} dakika mola başlatıldı.")
                     
-                    # Bir turnuvaya katıldıktan sonra döngüyü kır ki aynı anda birden fazla iş yükü oluşmasın
+                    # Bir turnuvaya katıldıktan sonra döngüyü kır
                     break 
                     
         except Exception as e:
             print(f"⚠️ [Tournament] Hata oluştu: {e}")
 
-    # Matchmaker sınıfına ekle:
     def _cleanup_history(self):
         """Çok eski turnuva kayıtlarını bellekten atar."""
-        if len(self.registered_tournaments) > 500: # Kayıt sayısı 500'ü geçerse
-            self.registered_tournaments.clear() # Veya sadece belirli bir yaşa göre temizle
+        if len(self.registered_tournaments) > 500: 
+            self.registered_tournaments.clear() 
             print("🧹 [System] Turnuva kayıt hafızası temizlendi.")
+
+    def is_challenge_acceptable(self, challenge):
+        """Sınıf içi yapıya uygun, tüm protokolleri koruyan kabul edici."""
+        
+        # Turnuva kontrolü
+        if self._is_in_tournament_game():
+            return False, "I am currently playing a tournament game."
+        
+        # Varyant Filtresi
+        variant = challenge.get('variant', {}).get('key')
+        if variant not in ['standard', 'chess960']:
+            return False, f"Variant '{variant}' is not supported."
+        
+        challenger = challenge.get('challenger')
+        if not challenger: 
+            return False, "Generic challenge"
+        
+        rating = challenger.get('rating') or 1500
+        title = challenger.get('title', '') or ''
+        is_bot = title.upper() == 'BOT'
+        
+        rated = challenge.get('rated', False)
+        user_id = challenger['id']
+        
+        time_control = challenge.get('timeControl', {})
+        if time_control.get('type') != 'clock':
+            return False, "Only standard clock games allowed"
+        
+        limit = time_control.get('limit', 0)
+        increment = time_control.get('increment', 0)
+        total_est_time = limit + (increment * 40)
+        
+        if self.opponent_tracker.get(user_id, 0) >= 3: 
+            return False, "Too many games recently"
+        
+        # Protokoller
+        if is_bot:
+            if rating >= 2000:
+                if total_est_time <= 1800: return True, "Accepted Masters Bot"
+                return False, "Total time too long for Masters"
+            elif 1500 <= rating < 2000:
+                if rated: return False, "Challengers must play Casual"
+                if total_est_time <= 300: return True, "Accepted Casual Challenger"
+                return False, "Total time too long for Challenger"
+            return False, "Bot rating too low"
+        else:
+            if rated: return False, "Humans must play Casual"
+            if total_est_time <= 600: return True, "Accepted Casual Human"
+            return False, "Human time limit exceeded"
             
     def _refresh_bot_pool(self):
         now = time.time()
@@ -180,18 +261,13 @@ class Matchmaker:
                     continue
 
                 if len(self.active_games) < SETTINGS["MAX_PARALLEL_GAMES"]:
-                    # 1. Herhangi bir bot bul (Henüz zamanı kısıtlamıyoruz)
                     target, target_rating = self._find_suitable_target(1800)
                     
                     if target:
-                        # 2. PROTOKOL UYGULAMA
                         if 1500 <= target_rating < 2000:
-                            # 1500-2000 arası: Sadece 5+0 ve altı, PUANSIZ
                             is_rated = False
-                            # Sadece izin verilenlerden birini seç
                             tc = random.choice(["0.5+0", "1+0", "2+1", "3+0", "3+2", "5+0"])
                         else:
-                            # 2000-4000 arası: Tüm kontroller, PUANLI
                             is_rated = SETTINGS["RATED_MODE"]
                             tc = random.choice(SETTINGS["TIME_CONTROLS"])
 
