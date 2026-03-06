@@ -57,13 +57,18 @@ class Matchmaker:
             return True
         return False
 
-    def _get_bot_rating(self, bot_id):
+    def _get_bot_rating(self, bot_id, clock_limit): # Parametreyi ekledik
         try:
+            # Süreye göre mod belirleme protokolü
+            if clock_limit < 180: mode = 'bullet'
+            elif clock_limit < 480: mode = 'blitz'
+            elif clock_limit < 1500: mode = 'rapid'
+            else: mode = 'classical'
+            
             user_data = self.client.users.get_public_data(bot_id)
-            perfs = user_data.get('perfs', {})
-            ratings = [perfs.get(m, {}).get('rating', 0) for m in ['blitz', 'bullet', 'rapid', 'classical']]
-            return max(ratings) if ratings else 0
-        except: return 0
+            return user_data.get('perfs', {}).get(mode, {}).get('rating', 0)
+        except: 
+            return 0
 
     def _is_in_tournament_game(self):
         """Aktif bir turnuva maçında olup olmadığını kontrol eder."""
@@ -140,7 +145,7 @@ class Matchmaker:
                 self.last_pool_update = now
             except: time.sleep(10)
 
-    def _find_suitable_target(self):
+    def _find_suitable_target(self, clock_limit):
         self._refresh_bot_pool()
         now = datetime.now()
         roll = random.random()
@@ -149,60 +154,60 @@ class Matchmaker:
         random.shuffle(self.bot_pool)
         for bot_id in self.bot_pool[:30]:
             if bot_id in self.blacklist and self.blacklist[bot_id] > now: continue
-            rating = self._get_bot_rating(bot_id)
+            rating = self._get_bot_rating(bot_id, clock_limit)
             time.sleep(0.4) 
             if target_range[0] <= rating <= target_range[1]:
                 return bot_id, rating
         return None, 0
 
     def start(self):
-        """Botun ana çalışma döngüsü."""
         if not self.enabled: 
             return
         
-        print(f"🚀 Void 3 Hybrid Manager Aktif. (Matchmaking + Tournament)")
-        
-        # Değişkeni döngü dışına tanımlayarak 'referenced before assignment' hatasını engelliyoruz
+        print(f"🚀 Void 3 Hybrid Manager Aktif. (Katı Protokol: 1500-2000 Puansız/Max 5+0)")
         last_cleanup_time = time.time()
 
         while True:
             try:
-                # 0. Bellek temizliği (Her 6 saatte bir kontrol et)
                 if time.time() - last_cleanup_time > 21600:
                     self._cleanup_history()
                     last_cleanup_time = time.time()
                     
-                # 1. Turnuva Yönetimi
                 self._manage_tournaments()
 
-                # 2. Güvenlik ve Durum Kontrolü
-                if self._is_in_tournament_game():
-                    print("⚔️ [Matchmaker] Turnuva maçındayım, matchmaking askıya alındı.")
+                if self._is_in_tournament_game() or self._is_stop_triggered():
                     time.sleep(60)
                     continue
 
-                if self._is_stop_triggered():
-                    time.sleep(15)
-                    continue
-
-                # 3. Klasik Matchmaking Döngüsü
                 if len(self.active_games) < SETTINGS["MAX_PARALLEL_GAMES"]:
-                    target, target_rating = self._find_suitable_target()
+                    # 1. Herhangi bir bot bul (Henüz zamanı kısıtlamıyoruz)
+                    target, target_rating = self._find_suitable_target(1800)
                     
                     if target:
-                        variant = 'chess960' if random.random() < SETTINGS["CHESS960_CHANCE"] else 'standard'
-                        tc = random.choice(SETTINGS["TIME_CONTROLS"])
+                        # 2. PROTOKOL UYGULAMA
+                        if 1500 <= target_rating < 2000:
+                            # 1500-2000 arası: Sadece 5+0 ve altı, PUANSIZ
+                            is_rated = False
+                            # Sadece izin verilenlerden birini seç
+                            tc = random.choice(["0.5+0", "1+0", "2+1", "3+0", "3+2", "5+0"])
+                        else:
+                            # 2000-4000 arası: Tüm kontroller, PUANLI
+                            is_rated = SETTINGS["RATED_MODE"]
+                            tc = random.choice(SETTINGS["TIME_CONTROLS"])
+
                         t_limit_raw, t_inc = map(float, tc.split('+'))
-                        is_rated = SETTINGS["RATED_MODE"] if target_rating >= 1800 else False
+                        clock_limit_seconds = int(t_limit_raw * 60)
                         
-                        print(f"[Matchmaker] -> {target} ({target_rating}) davet ediliyor...")
+                        variant = 'chess960' if random.random() < SETTINGS["CHESS960_CHANCE"] else 'standard'
+                        
+                        print(f"[Matchmaker] -> {target} ({target_rating}) | Rated: {is_rated} | TC: {tc}")
                         self.blacklist[target] = datetime.now() + timedelta(minutes=SETTINGS["BLACKLIST_MINUTES"])
                         
                         self.client.challenges.create(
                             username=target, 
                             rated=is_rated, 
                             variant=variant,
-                            clock_limit=int(t_limit_raw * 60), 
+                            clock_limit=clock_limit_seconds, 
                             clock_increment=int(t_inc)
                         )
                         time.sleep(SETTINGS["SAFETY_LOCK_TIME"])
@@ -212,12 +217,11 @@ class Matchmaker:
                     time.sleep(10)
 
             except Exception as e:
-                # API limit veya ağ hatası durumunda çökmemesi için hata yönetimi
                 error_str = str(e)
                 if "429" in error_str:
-                    print(f"⚠️ [Matchmaker] Hız sınırı aşıldı, {self.wait_timeout}sn bekleniyor.")
+                    print(f"⚠️ [Matchmaker] Hız sınırı (429), {self.wait_timeout}sn bekleniyor.")
                     time.sleep(self.wait_timeout)
                     self.wait_timeout = min(self.wait_timeout * 2, 900)
                 else:
-                    print(f"⚠️ [Matchmaker] Kritik Hata: {error_str}")
+                    print(f"⚠️ [Matchmaker] Hata: {error_str}")
                     time.sleep(30)
