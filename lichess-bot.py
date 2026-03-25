@@ -17,22 +17,17 @@ from matchmaking import Matchmaker
 # ⚙️ AYARLAR
 # ==========================================================
 SETTINGS = {
-    "TOKEN":            os.environ.get('LICHESS_TOKEN'),
-    "ENGINE_PATH":      "./src/Ethereal",
-    "BOOK_PATH":        "./book.bin",
+    "TOKEN":             os.environ.get('LICHESS_TOKEN'),
+    "ENGINE_PATH":       "./src/Ethereal",
+    "BOOK_PATH":         "./book.bin",
 
-    "MAX_PARALLEL_GAMES":   2,
-    "MAX_TOTAL_RUNTIME":    21300,   # 5.9 saat (GitHub Actions 6h limiti)
-    "STOP_ACCEPTING_MINS":  15,      # Son 15 dk yeni maç alma
+    "MAX_PARALLEL_GAMES":     2,
+    "MAX_TOTAL_RUNTIME":      21300,
+    "STOP_ACCEPTING_MINS":    15,
 
-    "LATENCY_BUFFER":       0.05,
-    "TABLEBASE_PIECE_LIMIT":7,
-
-    # Abort: rakip ilk hamleyi kaç saniyede yapmazsa terk et
-    "ABORT_WAIT_SECONDS":   60,
-
-    # Kaybetme tahmini eşiği (centipawn): motorun skoru bu değerin altına
-    # düşerse "kaybedeceğini anladı" mesajı gönderilir
+    "LATENCY_BUFFER":         0.05,
+    "TABLEBASE_PIECE_LIMIT":  7,
+    "ABORT_WAIT_SECONDS":     60,
     "LOSING_SCORE_THRESHOLD": -300,
 }
 
@@ -40,48 +35,41 @@ SETTINGS = {
 # 💬 MESAJ HAVUZLARI
 # ==========================================================
 MESSAGES = {
-    # Oyun başlangıcı — bot karşısında
     "greeting_bot": [
-        "Hi! Void 4 ready. Good luck! ♟️",
+        "Hi! Void 5 ready. Good luck! ♟️",
         "Let's play! May the best engine win 🤖",
-        "Void 4 on the board! Good luck! ⚡",
+        "Void 5 on the board! Good luck! ⚡",
         "Hello! Bringing my A-game today 😤♟️",
     ],
-    # Oyun başlangıcı — insan karşısında
     "greeting_human": [
-        "Hi! I'm Void 4, a chess bot. Good luck and have fun! 🎓♟️",
-        "Welcome! I'm Void 4. Let's play! After the game I'm happy to discuss any moves 🤖",
-        "Hello! Void 4 here. Good luck! Feel free to ask me about chess after we're done 🎓",
+        "Hi! I'm Void 5, a chess bot. Good luck and have fun! 🎓♟️",
+        "Welcome! I'm Void 5. Let's play! After the game I'm happy to discuss any moves 🤖",
+        "Hello! Void 5 here. Good luck! Feel free to ask me about chess after we're done 🎓",
         "Hi there! Let's play a great game. I'm always happy to help with chess questions afterwards! ♟️",
     ],
-    # Kazanma
     "win": [
         "Good game! Well played 🤝",
         "Thanks for the game! You put up a great fight ♟️",
         "GG! That was an interesting game 🎯",
         "Well played! Hope to play again soon 🤖",
     ],
-    # Kaybetme
     "loss": [
         "Good game! You played well, congratulations 🎉",
         "Well deserved win! GG 🤝",
         "Excellent play! I'll have to do better next time 😅",
         "GG! You outplayed me today 👏",
     ],
-    # Beraberlik
     "draw": [
         "Good game! A well-earned draw 🤝",
         "Balanced game! GG ♟️",
         "A draw! Both sides fought well 🎯",
     ],
-    # Kaybedeceğini anladığında (sadece insanlara, botlara saçma olur)
     "losing_realization": [
         "You're playing really well, I'm in trouble here! 😅",
         "Nice moves! I can see this is going to be tough 😬",
         "Impressive! You've got a strong position 👏",
         "I have to admit, you're outplaying me right now! 🎓",
     ],
-    # İnsan oyun sonu — öğrenme teklifi
     "human_postgame": [
         "GG! If you'd like to review any moves or have chess questions, feel free to ask! 🎓",
         "Well played! I'm happy to discuss the game or give tips if you're interested 🤖♟️",
@@ -89,31 +77,28 @@ MESSAGES = {
     ],
 }
 
-def pick_message(category: str) -> str:
+def pick_message(category):
     return random.choice(MESSAGES.get(category, ["Good game!"]))
 
-
 # ==========================================================
-# 🧠 AÇILIŞ TAKİBİ (aynı açılışı tekrarlamamak için)
+# 🧠 AÇILIŞ TAKİBİ
 # ==========================================================
 class OpeningTracker:
-    """Son N oyunda kullanılan açılışları takip eder."""
-    def __init__(self, memory_size: int = 10):
+    def __init__(self, memory_size=10):
         self.memory_size = memory_size
-        self.recent: list[str] = []   # ECO kodları veya ilk 6 hamle
+        self.recent = []
 
-    def record(self, opening_key: str):
+    def record(self, opening_key):
         if opening_key in self.recent:
             self.recent.remove(opening_key)
         self.recent.append(opening_key)
         if len(self.recent) > self.memory_size:
             self.recent.pop(0)
 
-    def was_recent(self, opening_key: str) -> bool:
+    def was_recent(self, opening_key):
         return opening_key in self.recent
 
-    def get_opening_key(self, board: chess.Board) -> str:
-        """İlk 5 hamleyi anahtar olarak kullan."""
+    def get_opening_key(self, board):
         moves = list(board.move_stack)[:5]
         return "_".join(m.uci() for m in moves)
 
@@ -123,17 +108,17 @@ class OpeningTracker:
 # ==========================================================
 class OxydanAegisV4:
     def __init__(self, exe_path, uci_options=None):
-        self.exe_path     = exe_path
-        self.book_path    = SETTINGS["BOOK_PATH"]
-        self.engine_pool  = queue.Queue()
+        self.exe_path        = exe_path
+        self.book_path       = SETTINGS["BOOK_PATH"]
+        self.engine_pool     = queue.Queue()
         self.opening_tracker = OpeningTracker(memory_size=10)
 
         pool_size = SETTINGS["MAX_PARALLEL_GAMES"] + 1
-
         try:
             for _ in range(pool_size):
                 eng = chess.engine.SimpleEngine.popen_uci(self.exe_path, timeout=30)
-                eng.configure({"Move Overhead": 100})
+                # DÜZELTME 1: "MoveOverhead" → "Move Overhead" (boşluklu yazım doğru)
+                eng.configure({"MoveOverhead": 250})
                 if uci_options:
                     for opt, val in uci_options.items():
                         try: eng.configure({opt: val})
@@ -150,47 +135,62 @@ class OxydanAegisV4:
         try:
             val = float(t)
             return val / 1000.0 if val > 1000 else val
-        except:
-            return 0.0
+        except: return 0.0
 
     def calculate_smart_time(self, t, inc, board):
-        buffer = SETTINGS.get("LATENCY_BUFFER", 0.05)
-
-        if t < 0.4:
-            return 0.01
-        if t < 1.0:
-            return max(0.02, (t * 0.12) + (inc * 0.9) - buffer)
-
+        # Buffer'ı 0.07 (70ms) yapıyoruz. Python'un işlem yükünü ve interneti karşılar.
+        buffer = SETTINGS.get("LATENCY_BUFFER", 0.07)
         move_count = len(board.move_stack)
-        moves_to_go = 35 if move_count < 20 else (22 if move_count < 40 else 12)
-
-        tension    = 0.7 + (board.legal_moves.count() / 45.0)
-        base_time  = (t / moves_to_go) * tension
-        final_time = base_time + (inc * 0.6)
-        final_time = min(final_time, t * 0.12, 15.0)
-        final_time *= random.uniform(0.88, 1.12)
-
-        return max(0.03, final_time - buffer)
-
-    def get_score(self, board) -> int | None:
-        """Mevcut pozisyon skorunu centipawn cinsinden döndürür (beyaz perspektifinden)."""
-        engine = None
-        try:
-            engine = self.engine_pool.get(timeout=1)
-            info   = engine.analyse(board, chess.engine.Limit(time=0.05))
-            score  = info.get("score")
-            if score:
-                cp = score.white().score(mate_score=10000)
-                return cp
-        except:
-            pass
-        finally:
-            if engine:
-                self.engine_pool.put(engine)
-        return None
+        
+        # ── 1. SEVİYE: ÖLÜM KALIM MODU (2 Saniye Altı) ──
+        if t < 2.0:
+            # Premove hızında oyna, sadece artırımı (increment) koru.
+            return max(0.01, (t * 0.02) + (inc * 0.98) - buffer)
+    
+        # ── 2. SEVİYE: ULTRA HIZLI MOD (5 Saniye Altı) ──
+        elif t < 5.0:
+            # Artırımın %95'ini kullan, eldeki ana sürenin sadece %3'üne dokun.
+            # Bu modda bot yaklaşık 0.1s - 0.2s içinde hamle yapar.
+            think = (t * 0.03) + (inc * 0.95)
+            return max(0.02, think - buffer)
+    
+        # ── 3. SEVİYE: ÇOK SERİ MOD (10 Saniye Altı) ──
+        elif t < 10.0:
+            # Artırımın %90'ını kullan, ana sürenin %5'ini harca.
+            # Ortalama hamle hızı: 0.3s - 0.4s
+            think = (t * 0.05) + (inc * 0.90)
+            return max(0.04, think - buffer)
+    
+        # ── 4. SEVİYE: HIZLI MOD (30 Saniye Altı) ──
+        elif t < 30.0:
+            # Senin istediğin "30 saniyede çok hızlı oyna" kısmı.
+            # Süreyi 60 hamleye bölüyoruz (çok güvenli), artırımın %85'ini alıyoruz.
+            # Ortalama hamle hızı: 0.5s - 0.8s
+            think = (t / 60) + (inc * 0.85)
+            return max(0.05, min(think, 1.2) - buffer) # 1.2 saniyeyi asla geçme!
+    
+        # ── 5. SEVİYE: NORMAL OYUN (30 Saniye Üstü) ──
+        else:
+            # Açılışta (ilk 15 hamle) süre biriktirmek için hızlı oyna.
+            if move_count < 15:
+                divisor = 50
+            elif move_count < 40:
+                divisor = 35
+            else:
+                divisor = 25 # Oyun sonu yaklaştıkça biraz daha kaliteye odaklan
+                
+            base_time = (t / divisor)
+            final_time = base_time + (inc * 0.7)
+            
+            # 30sn+ sürede konumsal gerginliği hesaba kat (Süre varken zekice düşün)
+            tension = 0.8 + (board.legal_moves.count() / 60.0)
+            final_time *= tension
+            
+            # Tek hamlede sürenin %8'ini veya max 12 saniyeyi geçme.
+            return max(0.1, min(final_time, t * 0.08, 12.0) - buffer)
 
     def get_best_move(self, board, wtime, btime, winc, binc):
-        # 1. KİTAP — standart satranç + açılış tekrarı engeli
+        # 1. KİTAP — standart satranç + açılış tekrar engeli
         if not board.chess960 and os.path.exists(self.book_path):
             try:
                 with chess.polyglot.open_reader(self.book_path) as reader:
@@ -199,13 +199,11 @@ class OxydanAegisV4:
                         shuffled = list(entries)
                         random.shuffle(shuffled)
                         for entry in shuffled:
-                            if entry.move not in board.legal_moves:
-                                continue
-                            # Açılış tekrarı kontrolü: tahtayı geçici push et
+                            if entry.move not in board.legal_moves: continue
                             board.push(entry.move)
-                            opening_key = self.opening_tracker.get_opening_key(board)
+                            key = self.opening_tracker.get_opening_key(board)
                             board.pop()
-                            if not self.opening_tracker.was_recent(opening_key):
+                            if not self.opening_tracker.was_recent(key):
                                 return entry.move
                         # Hepsi yakın geçmişte oynanmışsa yine de ilkini döndür
                         for entry in shuffled:
@@ -227,8 +225,7 @@ class OxydanAegisV4:
                         best = chess.Move.from_uci(data["moves"][0]["uci"])
                         if best in board.legal_moves:
                             return best
-            except:
-                pass
+            except: pass
 
         # 3. MOTOR (Ethereal)
         engine = None
@@ -239,7 +236,6 @@ class OxydanAegisV4:
             think   = self.calculate_smart_time(my_time, my_inc, board)
 
             result = engine.play(board, chess.engine.Limit(time=think))
-
             if result.move and result.move in board.legal_moves:
                 # Açılış kaydı (ilk 10 hamle içindeyse)
                 if len(board.move_stack) <= 10:
@@ -247,13 +243,11 @@ class OxydanAegisV4:
                     self.opening_tracker.record(self.opening_tracker.get_opening_key(board))
                     board.pop()
                 return result.move
-
             print(f"⚠️ Motor yasal olmayan hamle: {result.move}, fallback.")
         except Exception as e:
             print(f"🚨 Motor Hatası: {e}")
         finally:
-            if engine:
-                self.engine_pool.put(engine)
+            if engine: self.engine_pool.put(engine)
 
         legal = list(board.legal_moves)
         return legal[0] if legal else None
@@ -263,6 +257,18 @@ class OxydanAegisV4:
 # 🎮 OYUN YÖNETİMİ
 # ==========================================================
 
+def _get_game_mode(time_control):
+    """Süre kontrolünden oyun modunu belirler."""
+    # DÜZELTME 3: time_control dict değilse güvenli varsayılan
+    if not isinstance(time_control, dict):
+        return 'blitz'
+    limit = time_control.get('limit', 300)
+    if limit < 180:    return 'bullet'
+    elif limit < 480:  return 'blitz'
+    elif limit < 1500: return 'rapid'
+    else:              return 'classical'
+
+
 def handle_game(client, game_id, bot, my_id, mm):
     try:
         stream = client.bots.stream_game_state(game_id)
@@ -271,15 +277,14 @@ def handle_game(client, game_id, bot, my_id, mm):
         my_color         = None
         last_move_count  = 0
         is_vs_human      = False
-        game_started     = False   # İlk hamle yapıldı mı?
+        game_started     = False
         game_start_time  = None
-        losing_msg_sent  = False   # Kaybetme mesajı bir kez gönderilsin
+        losing_msg_sent  = False
+        game_mode        = 'blitz'
 
         for state in stream:
-            if 'error' in state:
-                break
+            if 'error' in state: break
 
-            # ── gameFull: oyun bilgileri geldi ──────────────────────
             if state['type'] == 'gameFull':
                 white = state.get('white', {})
                 black = state.get('black', {})
@@ -293,7 +298,7 @@ def handle_game(client, game_id, bot, my_id, mm):
                 if mm:
                     mm.opponent_tracker[opp_id] = mm.opponent_tracker.get(opp_id, 0) + 1
 
-                # Chess960 + initialFen ile doğru board başlatma
+                # DÜZELTME 4: Chess960 + initialFen ile doğru board başlatma
                 variant     = state.get('variant', {}).get('key', 'standard')
                 is_960      = variant == 'chess960'
                 initial_fen = state.get('initialFen', 'startpos')
@@ -303,29 +308,28 @@ def handle_game(client, game_id, bot, my_id, mm):
                 else:
                     board = chess.Board(chess960=is_960)
 
+                # Oyun modu — Chess960 ayrı kategori
+                clock     = state.get('clock', {})
+                game_mode = 'chess960' if is_960 else _get_game_mode(clock)
+
                 last_move_count = 0
                 game_start_time = time.time()
                 losing_msg_sent = False
 
-                # Selamlama mesajı
                 greeting_cat = "greeting_human" if is_vs_human else "greeting_bot"
-                try:
-                    client.bots.post_message(game_id, pick_message(greeting_cat))
-                except:
-                    pass
+                try: client.bots.post_message(game_id, pick_message(greeting_cat))
+                except: pass
 
                 curr_state = state['state']
 
-            # ── gameState: hamle/süre güncellemesi ──────────────────
             elif state['type'] == 'gameState':
                 curr_state = state
             else:
                 continue
 
-            if board is None:
-                continue
+            if board is None: continue
 
-            # ── Hamleleri güncelle ───────────────────────────────────
+            # DÜZELTME 5: push_uci → parse_uci + push (Chess960 rok hamleleri için)
             moves_str = curr_state.get('moves', '').strip()
             moves     = moves_str.split() if moves_str else []
 
@@ -339,7 +343,7 @@ def handle_game(client, game_id, bot, my_id, mm):
                         break
                 last_move_count = len(board.move_stack)
 
-            # ── Abort kontrolü: 60 sn içinde ilk hamle yapılmadıysa ─
+            # Abort kontrolü: 60sn içinde ilk hamle yapılmadıysa
             if (not game_started
                     and game_start_time
                     and (time.time() - game_start_time) > SETTINGS["ABORT_WAIT_SECONDS"]):
@@ -350,44 +354,47 @@ def handle_game(client, game_id, bot, my_id, mm):
                     print(f"⚠️ Abort hatası: {e}")
                 break
 
-            # ── Oyun sonu ────────────────────────────────────────────
+            # Oyun sonu
             status = curr_state.get('status')
             if status in ['mate', 'resign', 'draw', 'outoftime', 'aborted', 'stalemate']:
-                winner = curr_state.get('winner')   # 'white' | 'black' | None
+                winner       = curr_state.get('winner')
+                my_color_str = 'white' if my_color == chess.WHITE else 'black'
 
                 if status in ['draw', 'stalemate']:
-                    msg_cat = "draw"
+                    result  = 'draw'
+                    msg_cat = 'draw'
                 elif winner:
-                    my_color_str = 'white' if my_color == chess.WHITE else 'black'
-                    msg_cat = "win" if winner == my_color_str else "loss"
+                    result  = 'win' if winner == my_color_str else 'loss'
+                    msg_cat = result
                 else:
-                    msg_cat = "draw"
+                    result  = 'draw'
+                    msg_cat = 'draw'
 
                 try:
                     client.bots.post_message(game_id, pick_message(msg_cat))
                     if is_vs_human:
                         time.sleep(1)
                         client.bots.post_message(game_id, pick_message("human_postgame"))
-                except:
-                    pass
+                except: pass
+
+                # Koruma mekanizmasına sonucu bildir (abort sayılmaz)
+                if mm and status != 'aborted':
+                    mm.record_game_result(result, game_mode)
+
                 break
 
-            # ── Kaybettiğini anlama (sadece insanlara, orta oyun+) ───
-            if (is_vs_human
-                    and not losing_msg_sent
-                    and len(board.move_stack) >= 20):
+            # Kaybetme farkındalık mesajı (sadece insanlara, orta oyun+)
+            if is_vs_human and not losing_msg_sent and len(board.move_stack) >= 20:
                 try:
                     score = bot.get_score(board)
                     if score is not None:
-                        # Kendi rengine göre skoru çevir
                         my_score = score if my_color == chess.WHITE else -score
                         if my_score < SETTINGS["LOSING_SCORE_THRESHOLD"]:
                             client.bots.post_message(game_id, pick_message("losing_realization"))
                             losing_msg_sent = True
-                except:
-                    pass
+                except: pass
 
-            # ── Hamle sırası ─────────────────────────────────────────
+            # Hamle sırası
             if board.turn == my_color and not board.is_game_over():
                 move = bot.get_best_move(
                     board,
@@ -443,7 +450,8 @@ def main():
         mm = Matchmaker(client, config, active_games, token=SETTINGS["TOKEN"])
         threading.Thread(target=mm.start, daemon=True).start()
 
-    print(f"🔥 Oxydan 9 Hazır. ID: {my_id}", flush=True)
+    # DÜZELTME 6: "Oxydan 9" → "Oxydan 10" (sürüm tutarlılığı)
+    print(f"🔥 Oxydan 10 Hazır. ID: {my_id}", flush=True)
 
     while True:
         try:
