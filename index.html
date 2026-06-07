@@ -1,0 +1,646 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Void 6 | Live Dashboard</title>
+  <style>
+    :root {
+      --bg: #0b0f14;
+      --panel: #111821;
+      --line: #263341;
+      --text: #edf2f7;
+      --muted: #9aa8b6;
+      --blue: #58a6ff;
+      --green: #39d07f;
+      --gold: #e3b341;
+      --red: #ff6b6b;
+      --violet: #b48cff;
+      --cyan: #45d6d0;
+      --shadow: rgba(0, 0, 0, 0.38);
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      color: var(--text);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background:
+        radial-gradient(circle at 18% 8%, rgba(88, 166, 255, 0.18), transparent 30%),
+        radial-gradient(circle at 84% 12%, rgba(57, 208, 127, 0.12), transparent 28%),
+        linear-gradient(180deg, #0b0f14 0%, #0f141b 100%);
+    }
+
+    a { color: inherit; }
+
+    .page {
+      width: min(1180px, calc(100% - 32px));
+      margin: 0 auto;
+      padding: 24px 0 38px;
+    }
+
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 10px 0 22px;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      min-width: 0;
+    }
+
+    .mark {
+      width: 42px;
+      height: 42px;
+      display: grid;
+      place-items: center;
+      border: 1px solid rgba(88, 166, 255, 0.45);
+      border-radius: 8px;
+      background: linear-gradient(145deg, rgba(88,166,255,0.18), rgba(57,208,127,0.10));
+      color: var(--blue);
+      font-weight: 900;
+      box-shadow: 0 12px 32px var(--shadow);
+    }
+
+    .brand h1 {
+      margin: 0;
+      font-size: clamp(1.35rem, 3vw, 2.15rem);
+      line-height: 1;
+      letter-spacing: 0;
+    }
+
+    .brand p {
+      margin: 5px 0 0;
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+
+    .actions {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+
+    button, .link-button {
+      min-height: 38px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #141d27;
+      color: var(--text);
+      padding: 8px 12px;
+      font: inherit;
+      font-weight: 700;
+      cursor: pointer;
+      text-decoration: none;
+    }
+
+    button:hover, .link-button:hover {
+      border-color: var(--blue);
+      background: #182331;
+    }
+
+    .hero {
+      display: grid;
+      grid-template-columns: minmax(0, 1.2fr) minmax(320px, 0.8fr);
+      gap: 18px;
+      align-items: stretch;
+    }
+
+    .panel {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: rgba(17, 24, 33, 0.92);
+      box-shadow: 0 20px 60px var(--shadow);
+    }
+
+    .hero-main {
+      padding: clamp(22px, 5vw, 42px);
+      min-height: 360px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+    }
+
+    .eyebrow {
+      color: var(--green);
+      font-size: 0.78rem;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      font-weight: 900;
+    }
+
+    .hero-title {
+      margin: 12px 0;
+      max-width: 720px;
+      font-size: clamp(2.35rem, 6vw, 5.2rem);
+      line-height: 0.95;
+      letter-spacing: 0;
+    }
+
+    .hero-copy {
+      max-width: 720px;
+      color: var(--muted);
+      font-size: clamp(1rem, 2vw, 1.15rem);
+    }
+
+    .status-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 22px;
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 7px 11px;
+      background: rgba(255,255,255,0.03);
+      color: var(--muted);
+      font-size: 0.86rem;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--gold);
+      box-shadow: 0 0 14px currentColor;
+    }
+
+    .dot.ok { background: var(--green); color: var(--green); }
+    .dot.bad { background: var(--red); color: var(--red); }
+
+    .board-panel {
+      padding: 18px;
+      display: grid;
+      align-content: center;
+      gap: 16px;
+    }
+
+    .board {
+      width: min(100%, 360px);
+      aspect-ratio: 1;
+      margin: 0 auto;
+      display: grid;
+      grid-template-columns: repeat(8, 1fr);
+      overflow: hidden;
+      border: 1px solid #304052;
+      border-radius: 8px;
+      box-shadow: inset 0 0 0 1px rgba(255,255,255,0.04), 0 18px 40px var(--shadow);
+    }
+
+    .sq {
+      display: grid;
+      place-items: center;
+      font-weight: 900;
+      font-size: clamp(0.8rem, 2.6vw, 1.35rem);
+      color: rgba(237,242,247,0.86);
+    }
+
+    .light { background: #c8d4bd; color: #17212d; }
+    .dark { background: #476a52; }
+    .blue-piece { color: #0d47a1; }
+    .gold-piece { color: #7a4d00; }
+
+    .board-caption {
+      color: var(--muted);
+      text-align: center;
+      font-size: 0.92rem;
+    }
+
+    .section {
+      margin-top: 18px;
+      padding: 22px;
+    }
+
+    .section-head {
+      display: flex;
+      align-items: end;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+
+    .section h2 {
+      margin: 0;
+      font-size: 1.2rem;
+      letter-spacing: 0;
+    }
+
+    .section small { color: var(--muted); }
+
+    .stat-grid {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .stat-card {
+      min-height: 126px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #0d131a;
+      padding: 15px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+    }
+
+    .stat-card strong {
+      color: var(--muted);
+      font-size: 0.78rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+
+    .stat-value {
+      margin-top: 10px;
+      font-size: 2rem;
+      font-weight: 900;
+      line-height: 1;
+    }
+
+    .stat-meta {
+      color: var(--muted);
+      font-size: 0.82rem;
+    }
+
+    .content-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 14px;
+    }
+
+    .mini-card {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #0d131a;
+      padding: 16px;
+    }
+
+    .mini-card h3 {
+      margin: 0 0 10px;
+      font-size: 1rem;
+    }
+
+    .list {
+      list-style: none;
+      padding: 0;
+      margin: 0;
+      display: grid;
+      gap: 9px;
+      color: var(--muted);
+    }
+
+    .list li {
+      display: grid;
+      grid-template-columns: 18px 1fr;
+      gap: 8px;
+      align-items: start;
+    }
+
+    .list li::before {
+      content: "";
+      width: 8px;
+      height: 8px;
+      margin-top: 8px;
+      border-radius: 50%;
+      background: var(--cyan);
+    }
+
+    .table-wrap {
+      overflow-x: auto;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #0d131a;
+    }
+
+    table {
+      width: 100%;
+      min-width: 640px;
+      border-collapse: collapse;
+    }
+
+    th, td {
+      padding: 12px 14px;
+      text-align: left;
+      border-bottom: 1px solid #202b36;
+    }
+
+    th {
+      color: var(--muted);
+      font-size: 0.78rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+
+    tr:last-child td { border-bottom: 0; }
+
+    .tag {
+      display: inline-flex;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 3px 8px;
+      color: var(--muted);
+      font-size: 0.78rem;
+      font-weight: 700;
+    }
+
+    footer {
+      color: var(--muted);
+      text-align: center;
+      padding: 22px 0 0;
+      font-size: 0.88rem;
+    }
+
+    @media (max-width: 900px) {
+      .hero, .content-grid { grid-template-columns: 1fr; }
+      .stat-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .topbar { align-items: flex-start; flex-direction: column; }
+      .actions { justify-content: flex-start; }
+    }
+
+    @media (max-width: 520px) {
+      .page { width: min(100% - 20px, 1180px); padding-top: 12px; }
+      .hero-main, .section { padding: 16px; }
+      .stat-grid { grid-template-columns: 1fr; }
+      .pill { white-space: normal; }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <nav class="topbar" aria-label="Dashboard navigation">
+      <div class="brand">
+        <div class="mark" aria-hidden="true">O11</div>
+        <div>
+          <h1>Void 6</h1>
+          <p>Live Lichess dashboard by Emir Karadag</p>
+        </div>
+      </div>
+      <div class="actions">
+        <button id="refresh-btn" type="button">Refresh</button>
+        <a class="link-button" href="https://lichess.org/@/OxydanBot" target="_blank" rel="noreferrer">Open Lichess</a>
+      </div>
+    </nav>
+
+    <section class="hero">
+      <div class="panel hero-main">
+        <div>
+          <div class="eyebrow">Engine status</div>
+          <h2 class="hero-title">Void 6 Live Control</h2>
+          <p class="hero-copy">
+            A clean public dashboard for the Oxydan chess bot: live ratings, match policy,
+            engine features and operational status without broken characters or mixed-up stats.
+          </p>
+          <div class="status-row">
+            <span class="pill"><span class="dot" id="api-dot"></span><span id="api-status">Waiting for Lichess</span></span>
+            <span class="pill" id="peak-pill">Peak: loading</span>
+            <span class="pill" id="last-sync">Last sync: not yet</span>
+          </div>
+        </div>
+      </div>
+
+      <aside class="panel board-panel" aria-label="Visual chess board">
+        <div class="board" id="visual-board" aria-hidden="true"></div>
+        <div class="board-caption">Balanced for blitz, bullet and bot-vs-bot testing.</div>
+      </aside>
+    </section>
+
+    <section class="panel section">
+      <div class="section-head">
+        <h2>Live Ratings</h2>
+        <small id="profile-line">Profile data will load from Lichess.</small>
+      </div>
+      <div class="stat-grid">
+        <article class="stat-card">
+          <strong>Bullet</strong>
+          <div class="stat-value" id="bullet-val" style="color: var(--red);">...</div>
+          <div class="stat-meta" id="bullet-games">0 games</div>
+        </article>
+        <article class="stat-card">
+          <strong>Blitz</strong>
+          <div class="stat-value" id="blitz-val" style="color: var(--gold);">...</div>
+          <div class="stat-meta" id="blitz-games">0 games</div>
+        </article>
+        <article class="stat-card">
+          <strong>Rapid</strong>
+          <div class="stat-value" id="rapid-val" style="color: var(--green);">...</div>
+          <div class="stat-meta" id="rapid-games">0 games</div>
+        </article>
+        <article class="stat-card">
+          <strong>Classical</strong>
+          <div class="stat-value" id="classical-val" style="color: var(--blue);">...</div>
+          <div class="stat-meta" id="classical-games">0 games</div>
+        </article>
+        <article class="stat-card">
+          <strong>Chess960</strong>
+          <div class="stat-value" id="chess960-val" style="color: var(--violet);">...</div>
+          <div class="stat-meta" id="chess960-games">0 games</div>
+        </article>
+      </div>
+    </section>
+
+    <section class="panel section">
+      <div class="section-head">
+        <h2>Competitive Standing</h2>
+        <small>Updated from the same API response as the cards.</small>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Category</th>
+              <th>Current Rating</th>
+              <th>Total Games</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td>Bullet</td><td id="t-bullet-val">...</td><td id="t-bullet-games">...</td><td><span class="tag">Fast control</span></td></tr>
+            <tr><td>Blitz</td><td id="t-blitz-val">...</td><td id="t-blitz-games">...</td><td><span class="tag">Main pool</span></td></tr>
+            <tr><td>Rapid</td><td id="t-rapid-val">...</td><td id="t-rapid-games">...</td><td><span class="tag">Deep search</span></td></tr>
+            <tr><td>Classical</td><td id="t-classical-val">...</td><td id="t-classical-games">...</td><td><span class="tag">Long control</span></td></tr>
+            <tr><td>Chess960</td><td id="t-chess960-val">...</td><td id="t-chess960-games">...</td><td><span class="tag">Variant ready</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="content-grid">
+      <article class="panel section">
+        <h2>Challenge Protocol</h2>
+        <div class="content-grid" style="grid-template-columns: 1fr; margin-top: 14px;">
+          <div class="mini-card">
+            <h3>Elite bots</h3>
+            <ul class="list">
+              <li>2300+ rating accepted in rated games.</li>
+              <li>Standard and Chess960 are supported.</li>
+              <li>Time controls from bullet to classical are allowed.</li>
+            </ul>
+          </div>
+          <div class="mini-card">
+            <h3>Protection rules</h3>
+            <ul class="list">
+              <li>Low-rated bots are routed to safer casual games.</li>
+              <li>Opponent repeat limits protect rating and variety.</li>
+              <li>Matchmaking can enter protection mode after rating drops.</li>
+            </ul>
+          </div>
+        </div>
+      </article>
+
+      <article class="panel section">
+        <h2>Core Capabilities</h2>
+        <div class="content-grid" style="grid-template-columns: 1fr; margin-top: 14px;">
+          <div class="mini-card">
+            <h3>Engine stack</h3>
+            <ul class="list">
+              <li>Ethereal-based UCI engine pipeline.</li>
+              <li>NNUE evaluation with opening book support.</li>
+              <li>Safer time management for increment games.</li>
+            </ul>
+          </div>
+          <div class="mini-card">
+            <h3>Operations</h3>
+            <ul class="list">
+              <li>Auto-abort for inactive opponents.</li>
+              <li>Fallback move selection if the engine fails.</li>
+              <li>Optional chat and post-game messaging.</li>
+            </ul>
+          </div>
+        </div>
+      </article>
+    </section>
+
+    <footer>
+      Oxydan 11 dashboard. Live data comes from the public Lichess API.
+    </footer>
+  </main>
+
+  <script>
+    const BOT_LICHESS_USERNAME = "Void_Bot";
+    const PERF_KEYS = ["bullet", "blitz", "rapid", "classical", "chess960"];
+
+    const fallbackStats = {
+      bullet: { rating: 2806, games: 0 },
+      blitz: { rating: 2747, games: 0 },
+      rapid: { rating: 2709, games: 0 },
+      classical: { rating: 2709, games: 0 },
+      chess960: { rating: 2091, games: 0 }
+    };
+
+    function byId(id) {
+      return document.getElementById(id);
+    }
+
+    function formatRating(perf) {
+      if (!perf || !perf.rating) return "...";
+      return `${perf.rating}${perf.prov ? "?" : ""}`;
+    }
+
+    function updatePerf(key, perf) {
+      const rating = formatRating(perf);
+      const games = perf && Number.isFinite(perf.games) ? perf.games : 0;
+      byId(`${key}-val`).textContent = rating;
+      byId(`t-${key}-val`).textContent = rating;
+      byId(`${key}-games`).textContent = `${games} games`;
+      byId(`t-${key}-games`).textContent = games;
+    }
+
+    function setApiState(state, message) {
+      const dot = byId("api-dot");
+      dot.className = state === "ok" ? "dot ok" : state === "bad" ? "dot bad" : "dot";
+      byId("api-status").textContent = message;
+    }
+
+    function updatePeak(perfs) {
+      const values = PERF_KEYS
+        .map((key) => perfs[key] && perfs[key].rating)
+        .filter((rating) => Number.isFinite(rating));
+      const peak = values.length ? Math.max(...values) : 0;
+      byId("peak-pill").textContent = peak ? `Peak: ${peak}` : "Peak: unavailable";
+    }
+
+    function updateLastSync() {
+      const now = new Date();
+      byId("last-sync").textContent = `Last sync: ${now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
+    }
+
+    function renderBoard() {
+      const board = byId("visual-board");
+      const pieces = {
+        "0,0": "r", "0,1": "n", "0,2": "b", "0,3": "q", "0,4": "k", "0,5": "b", "0,6": "n", "0,7": "r",
+        "1,0": "p", "1,1": "p", "1,2": "p", "1,3": "p", "1,4": "p", "1,5": "p", "1,6": "p", "1,7": "p",
+        "6,0": "P", "6,1": "P", "6,2": "P", "6,3": "P", "6,4": "P", "6,5": "P", "6,6": "P", "6,7": "P",
+        "7,0": "R", "7,1": "N", "7,2": "B", "7,3": "Q", "7,4": "K", "7,5": "B", "7,6": "N", "7,7": "R"
+      };
+
+      board.innerHTML = "";
+      for (let row = 0; row < 8; row += 1) {
+        for (let col = 0; col < 8; col += 1) {
+          const square = document.createElement("div");
+          square.className = `sq ${(row + col) % 2 === 0 ? "light" : "dark"}`;
+          const piece = pieces[`${row},${col}`] || "";
+          square.textContent = piece;
+          if (piece) square.classList.add(piece === piece.toUpperCase() ? "blue-piece" : "gold-piece");
+          board.appendChild(square);
+        }
+      }
+    }
+
+    async function fetchLichessStats() {
+      const refreshButton = byId("refresh-btn");
+      refreshButton.disabled = true;
+      refreshButton.textContent = "Loading";
+      setApiState("wait", "Connecting to Lichess");
+
+      try {
+        const response = await fetch(`https://lichess.org/api/user/${BOT_LICHESS_USERNAME}`, {
+          headers: { Accept: "application/json" }
+        });
+        if (!response.ok) throw new Error(`Lichess returned ${response.status}`);
+
+        const data = await response.json();
+        const perfs = data.perfs || {};
+
+        PERF_KEYS.forEach((key) => updatePerf(key, perfs[key]));
+        updatePeak(perfs);
+        updateLastSync();
+        byId("profile-line").textContent = `${data.username || BOT_LICHESS_USERNAME} profile loaded from Lichess.`;
+        setApiState("ok", "Live data connected");
+      } catch (error) {
+        console.error("Lichess API error:", error);
+        PERF_KEYS.forEach((key) => updatePerf(key, fallbackStats[key]));
+        updatePeak(fallbackStats);
+        updateLastSync();
+        byId("profile-line").textContent = "Showing fallback values because live data could not be loaded.";
+        setApiState("bad", "Fallback data shown");
+      } finally {
+        refreshButton.disabled = false;
+        refreshButton.textContent = "Refresh";
+      }
+    }
+
+    window.addEventListener("DOMContentLoaded", () => {
+      renderBoard();
+      fetchLichessStats();
+      byId("refresh-btn").addEventListener("click", fetchLichessStats);
+    });
+  </script>
+</body>
+</html>
