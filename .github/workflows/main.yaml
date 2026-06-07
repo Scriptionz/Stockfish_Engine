@@ -17,18 +17,19 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Python Kurulumu
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5 # v4 yerine en güncel v5 sürümüne yükselttim
         with:
           python-version: '3.10'
 
-      - name: Cerebellum Kitabini Indir ve Kur
+      # 🛠️ GÜVENLİ KİTAP ADIMI: Eğer Void'de kitap kullanmıyorsan bu adımı komple silebilirsin!
+      - name: Açılış Kitabını Kur (Eğer Void de kullanacaksa)
         run: |
-          echo "📚 Devasa açılış kitabı indiriliyor..."
-          curl -L "https://github.com/Scriptionz/Oxydan-Chess-Bot/releases/download/v1_Book/Cerebellum3Merge.zip" -o book.zip
-          echo "📂 ZIP'ten çıkarılıyor..."
-          unzip book.zip
-          mv Cerebellum3Merge.bin book.bin
-          echo "✅ Kitap hazır: $(ls -lh book.bin)"
+          # Eğer projenin ana dizininde zaten bir book.bin varsa hata vermemesi için koruma ekledik
+          if [ -f "book.bin" ]; then
+            echo "✅ Kitap zaten ana dizinde mevcut."
+          else
+            echo "📚 Kitap bulunamadı, config.yml'de 'opening_books: enabled: false' olduğundan emin ol."
+          fi
 
       - name: Stockfish 18 Motorunu Kur (Garantili Link)
         run: |
@@ -37,20 +38,16 @@ jobs:
           # 1. Klasör hazırlığı
           mkdir -p src
           
-          # 2. Senin verdiğin doğrudan linkle indirme
+          # 2. Resmi Stockfish linkiyle indirme
           wget -q --show-progress "https://github.com/official-stockfish/Stockfish/releases/download/sf_18/stockfish-ubuntu-x86-64-avx2.tar" -O sf18.tar
           
-          # 3. Dosyanın indiğini ve boyutunu kontrol et
-          ls -lh sf18.tar
-          
-          # 4. Paketi aç (Düz .tar olduğu için -xvf kullanıyoruz)
+          # 3. Paketi aç
           tar -xvf sf18.tar
           
-          # 5. Motoru bul ve 'Ethereal' olarak maskele
-          # Not: find komutu klasörün içindeki o uzun isimli dosyayı otomatik bulur
+          # 4. Motoru bul ve 'Ethereal' olarak maskele
           find . -maxdepth 3 -type f -name "stockfish-ubuntu-x86-64-avx2" -exec mv {} ./src/Ethereal \;
           
-          # 6. İzinleri ver ve test et
+          # 5. İzinleri ver ve test et
           chmod +x ./src/Ethereal
           echo "✅ Motor başarıyla kuruldu ve maskelendi."
           ./src/Ethereal uci | grep "Stockfish 18"
