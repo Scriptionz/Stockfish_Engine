@@ -1,22 +1,31 @@
+# --- LICHESS BAĞLANTI AYARLARI ---
 token: "$LICHESS_TOKEN"
 url: "https://lichess.org/"
 
+# --- MOTOR (UCI) AYARLARI ---
 engine:
   dir: "./src/"
   name: "Ethereal"
   protocol: "uci"
   uci_options:
-    Threads: 1
+    Threads: 2            # İşlemciyi boğmadan performans almak için 2 idealdir
     Hash: 512
-    MoveOverhead: 500
-    Ponder: false
+    MoveOverhead: 350     # 500ms bullet için çok yüksekti, 100ms güvenli hıza çekildi
+    Ponder: true          # Akıllı Pondering özelliği için aktif edildi
     SyzygyPath: "./syzygy"
     SyzygyProbeDepth: 1
 
-# --- SOSYAL AYARLAR ---
+# --- SOSYAL AYARLAR (CHAT) ---
 chat:
-  welcome: "Hi! Void v3 active. Tournament & Matchmaking mode enabled. Be ready!"
-  goodbye: "GG! See you later."
+  welcome: "Hi! Void 6 active. Advanced Pondering & Local Tablebase enabled. Good luck!"
+  goodbye: "GG! Thanks for the game. Let's analyze later if you want!"
+
+# --- LICHESS TAKIM AYARLARI ---
+teams:
+  priority_mode: true     # Botun eklendiği takımlardan gelen isteklere öncelik ver
+  allowed_teams:
+    - "lichess-bots"
+    - "computer-chess-club"
 
 # --- SAVAŞ MODU (GELEN MEYDAN OKUMALAR) ---
 challenge_policy:
@@ -28,7 +37,7 @@ challenge_policy:
     - blitz
     - rapid
     - classical
-  min_time: 60
+  min_time: 30            # Hyperbullet (30s) maçları da kabul edebilmesi için düşürüldü
   max_time: 2000
 
 # --- MATCHMAKING & TURNUVA (HYBRID) ---
@@ -41,7 +50,7 @@ matchmaking:
   # --- Turnuva Ayarları ---
   auto_tournament: true
   join_upcoming_mins: 15
-  only_bot_tourneys: true
+  only_bot_tourneys: false # Takım turnuvalarında insanlarla da oynayabilmesi için esnetildi
   
   # --- ELO KORUMA FİLTRESİ ---
   opponent_min_rating: 1500
@@ -58,8 +67,7 @@ matchmaking:
     - "5+2"
     - "10+0"
     - "10+2"
-    - "30+0"
     
   challenge_bots: true
-  challenge_humans: false
+  challenge_humans: true   # Takım arkadaşlarından gelen istekler için aktif
   selection: "random"
